@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Repository } from 'typeorm';
 import { Ingredient } from './entities/ingredient.entity';
@@ -27,13 +31,41 @@ export class IngredientsService {
     const ingredient = this.ingredientsRepository.create(createIngredientDto);
     return this.ingredientsRepository.save(ingredient);
   }
+  async bulkCreate(
+    ingredients: Partial<CreateIngredientDto>[],
+  ): Promise<Ingredient[]> {
+    const savedIngredients: Ingredient[] = [];
+
+    for (const ing of ingredients) {
+      if (!ing.name) continue; // skip if name is missing
+
+      // check if ingredient exists
+      const exists = await this.ingredientsRepository.findOne({
+        where: { name: ILike(ing.name) },
+      });
+
+      if (!exists) {
+        const ingredient = this.ingredientsRepository.create(ing);
+        savedIngredients.push(
+          await this.ingredientsRepository.save(ingredient),
+        );
+      }
+    }
+
+    return savedIngredients;
+  }
 
   async findAll(
     page = 1,
     limit = 10,
     search?: string,
     category?: string,
-  ): Promise<{ data: Ingredient[]; count: number }> {
+  ): Promise<{
+    data: Ingredient[];
+    count: number;
+    page: number;
+    totalPages: number;
+  }> {
     const skip = (page - 1) * limit;
     const where: any = {};
 
@@ -52,7 +84,9 @@ export class IngredientsService {
       order: { name: 'ASC' },
     });
 
-    return { data, count };
+    const totalPages = Math.ceil(count / limit);
+
+    return { data, count, page, totalPages };
   }
 
   async findByIds(ids: string[]): Promise<Ingredient[]> {
@@ -63,7 +97,9 @@ export class IngredientsService {
   }
 
   async findOne(id: string): Promise<Ingredient> {
-    const ingredient = await this.ingredientsRepository.findOne({ where: { id } });
+    const ingredient = await this.ingredientsRepository.findOne({
+      where: { id },
+    });
     if (!ingredient) {
       throw new NotFoundException(`Ingredient with ID "${id}" not found`);
     }
@@ -81,10 +117,15 @@ export class IngredientsService {
     updateIngredientDto: UpdateIngredientDto,
   ): Promise<Ingredient> {
     const ingredient = await this.findOne(id);
-    
+
     // Check if updating name would cause a duplicate
-    if (updateIngredientDto.name && updateIngredientDto.name !== ingredient.name) {
-      const existingIngredient = await this.findByName(updateIngredientDto.name);
+    if (
+      updateIngredientDto.name &&
+      updateIngredientDto.name !== ingredient.name
+    ) {
+      const existingIngredient = await this.findByName(
+        updateIngredientDto.name,
+      );
       if (existingIngredient) {
         throw new BadRequestException(
           `Ingredient with name "${updateIngredientDto.name}" already exists`,
