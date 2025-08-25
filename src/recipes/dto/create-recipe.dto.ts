@@ -1,4 +1,14 @@
-import { IsArray, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, IsUrl, Min, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { CuisineType, MealType } from '../entities/recipe.entity';
 
@@ -39,7 +49,7 @@ export class CreateRecipeDto {
   prepTime: number; // in minutes
 
   @IsNumber()
-  @Min(1)
+  @Min(0)
   cookTime: number; // in minutes
 
   @IsNumber()

@@ -1,4 +1,14 @@
-import { Column, Entity, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, ManyToMany, JoinTable } from 'typeorm';
+import {
+  Column,
+  Entity,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  ManyToMany,
+  JoinTable,
+} from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Ingredient } from '../../ingredients/entities/ingredient.entity';
 
@@ -117,7 +127,7 @@ export class Recipe {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @ManyToMany(() => User, user => user.likedRecipes, { onDelete: 'CASCADE' })
+  @ManyToMany(() => User, (user) => user.likedRecipes, { onDelete: 'CASCADE' })
   @JoinTable()
   likedBy: User[];
 

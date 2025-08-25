@@ -74,7 +74,7 @@ export class IngredientsService {
     }
 
     if (category) {
-      where.category = category;
+      where.category = category as any;
     }
 
     const [data, count] = await this.ingredientsRepository.findAndCount({
@@ -173,6 +173,92 @@ export class IngredientsService {
       .orderBy('ingredient.category', 'ASC')
       .getRawMany();
 
-    return categories.map((c) => c.category);
+    return categories.map((c: { category: string }) => c.category);
+  }
+
+  async findByCategory(
+    category: string,
+    page = 1,
+    limit = 50,
+  ): Promise<{
+    data: Ingredient[];
+    count: number;
+    page: number;
+    totalPages: number;
+    category: string;
+  }> {
+    const skip = (page - 1) * limit;
+
+    const [data, count] = await this.ingredientsRepository.findAndCount({
+      where: { category: category as any },
+      skip,
+      take: limit,
+      order: { name: 'ASC' },
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    return { data, count, page, totalPages, category };
+  }
+
+  async getCommonIngredientsByCategory(
+    category: string,
+  ): Promise<Ingredient[]> {
+    return this.ingredientsRepository.find({
+      where: {
+        category: category as any,
+        isCommon: true,
+      },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async getCategoryStats(category: string): Promise<{
+    category: string;
+    totalCount: number;
+    commonCount: number;
+    averageCalories: number;
+    averageProtein: number;
+    averageCarbs: number;
+    averageFat: number;
+  }> {
+    const ingredients = await this.ingredientsRepository.find({
+      where: { category: category as any },
+    });
+
+    const commonIngredients = ingredients.filter((ing) => ing.isCommon);
+
+    const totalCount = ingredients.length;
+    const commonCount = commonIngredients.length;
+
+    if (totalCount === 0) {
+      return {
+        category,
+        totalCount: 0,
+        commonCount: 0,
+        averageCalories: 0,
+        averageProtein: 0,
+        averageCarbs: 0,
+        averageFat: 0,
+      };
+    }
+
+    const totalCalories = ingredients.reduce(
+      (sum, ing) => sum + ing.calories,
+      0,
+    );
+    const totalProtein = ingredients.reduce((sum, ing) => sum + ing.protein, 0);
+    const totalCarbs = ingredients.reduce((sum, ing) => sum + ing.carbs, 0);
+    const totalFat = ingredients.reduce((sum, ing) => sum + ing.fat, 0);
+
+    return {
+      category,
+      totalCount,
+      commonCount,
+      averageCalories: Math.round((totalCalories / totalCount) * 100) / 100,
+      averageProtein: Math.round((totalProtein / totalCount) * 100) / 100,
+      averageCarbs: Math.round((totalCarbs / totalCount) * 100) / 100,
+      averageFat: Math.round((totalFat / totalCount) * 100) / 100,
+    };
   }
 }

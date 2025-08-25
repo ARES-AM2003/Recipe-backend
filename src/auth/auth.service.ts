@@ -57,11 +57,14 @@ export class AuthService {
       console.log({
         plain: password,
         hashInDB: user.password,
-        valid: await bcrypt.compare(password.trim(), user.password)
+        valid: await bcrypt.compare(password.trim(), user.password),
       });
-      
-      const isPasswordValid = await bcrypt.compare(password.trim(),user.password);
-      
+
+      const isPasswordValid = await bcrypt.compare(
+        password.trim(),
+        user.password,
+      );
+
       if (!isPasswordValid) {
         this.logger.debug(`Invalid password for user: ${user.id}`);
         throw new UnauthorizedException('Invalid credentials');
@@ -95,18 +98,21 @@ export class AuthService {
     if (existingUser) {
       throw new BadRequestException('Email already in use');
     }
-  
+
     // const hashedPassword = await bcrypt.hash(registerDto.password, 10);
     const user = await this.usersService.create({
       ...registerDto,
       // password: hashedPassword,
     });
-  
+
     // Return both the user and tokens
     const tokens = await this.generateTokens(user);
-    return { user, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken };
+    return {
+      user,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
   }
-  
 
   async login(loginDto: LoginDto) {
     const user = await this.validateUser(loginDto.email, loginDto.password);
@@ -115,13 +121,27 @@ export class AuthService {
 
   async refreshTokens(refreshToken: string) {
     try {
-      const payload = await this.jwtService.verifyAsync<TokenPayload>(refreshToken, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-      });
+      const payload = await this.jwtService.verifyAsync<TokenPayload>(
+        refreshToken,
+        {
+          secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+        },
+      );
 
       const user = await this.usersService.findById(payload.userId);
-      
-      // Create a user object with all required properties
+      if (!user || !user.currentHashedRefreshToken) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      const isValid = await bcrypt.compare(
+        refreshToken,
+        user.currentHashedRefreshToken,
+      );
+
+      if (!isValid) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
       const userData: Omit<User, 'password'> = {
         id: user.id,
         email: user.email,
@@ -153,14 +173,23 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
         secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
-        expiresIn: this.configService.get<string>('JWT_ACCESS_EXPIRES_IN', '15m'),
+        expiresIn: this.configService.get<string>(
+          'JWT_ACCESS_EXPIRES_IN',
+          '15m',
+        ),
       }),
       this.jwtService.signAsync(payload, {
         secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        expiresIn: this.configService.get<string>('JWT_REFRESH_EXPIRES_IN', '7d'),
+        expiresIn: this.configService.get<string>(
+          'JWT_REFRESH_EXPIRES_IN',
+          '7d',
+        ),
       }),
     ]);
-    await this.usersService.updateToken(payload.userId, await bcrypt.hash(refreshToken, 10));
+    await this.usersService.updateToken(
+      payload.userId,
+      await bcrypt.hash(refreshToken, 10),
+    );
 
     return {
       accessToken,

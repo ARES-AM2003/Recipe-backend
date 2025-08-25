@@ -20,7 +20,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Request } from 'express';
 import { User } from '../users/entities/user.entity';
 import { GetUser } from '../common/decorators/get-user.decorator';
-import { ApiBody, ApiOperation } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation } from '@nestjs/swagger';
+import { Auth } from 'src/auth/decorators/auth.decorator';
 
 export interface RequestWithUser extends Request {
   user: User;
@@ -31,9 +32,10 @@ export class RecipesController {
   constructor(private readonly recipesService: RecipesService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
-  create(@Body() createRecipeDto: CreateRecipeDto, @GetUser() user: any) {
-    return this.recipesService.create(createRecipeDto, user);
+  @Auth()
+  @ApiBearerAuth('JWT')
+  async create(@Body() createRecipeDto: CreateRecipeDto, @Req() req: any) {
+    return await this.recipesService.create(createRecipeDto, req.user);
   }
 
   @Get()
@@ -95,8 +97,8 @@ export class RecipesController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.recipesService.findOne(id);
+  async findOne(@Param('id') id: string) {
+    return await this.recipesService.findOne(id);
   }
 
   @Patch(':id')
@@ -116,8 +118,10 @@ export class RecipesController {
   }
 
   @Post(':id/like')
-  @UseGuards(JwtAuthGuard)
-  async likeRecipe(@Param('id') id: string, @GetUser() user: User) {
+  @Auth()
+  @ApiBearerAuth('JWT')
+  async likeRecipe(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as User;
     return this.recipesService.likeRecipe(id, user.id);
   }
 }

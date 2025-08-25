@@ -29,7 +29,7 @@ export class NutritionController {
   @Get('recipes')
   @ApiOperation({ summary: 'Get recipes filtered by nutritional values' })
   @ApiResponse({ status: 200, description: 'Returns filtered recipes' })
-  getRecipesByNutrition(
+  async getRecipesByNutrition(
     @Query() filters: NutritionFiltersDto,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
@@ -37,7 +37,11 @@ export class NutritionController {
     console.log(filters);
     console.log(page);
     console.log(limit);
-    return this.nutritionService.getRecipesByNutrition(filters, page, limit);
+    return await this.nutritionService.getRecipesByNutrition(
+      filters,
+      page,
+      limit,
+    );
   }
 
   @Get('insights')

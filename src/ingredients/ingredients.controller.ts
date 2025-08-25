@@ -18,9 +18,16 @@ import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiTags,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as XLSX from 'xlsx';
+
 @ApiTags('ingredients')
 @Controller('ingredients')
 export class IngredientsController {
@@ -29,7 +36,7 @@ export class IngredientsController {
   @Post()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  create(@Body() createIngredientDto: CreateIngredientDto) {
+  async create(@Body() createIngredientDto: CreateIngredientDto) {
     return this.ingredientsService.create(createIngredientDto);
   }
 
@@ -66,17 +73,53 @@ export class IngredientsController {
   }
 
   @Get()
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Items per page (default: 1000)',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search by ingredient name',
+  })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    type: String,
+    description: 'Filter by category',
+  })
   async findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 1000,
-    // @Query('search') search?: string,
-    // @Query('category') category?: string,
+    @Query('search') search?: string,
+    @Query('category') category?: string,
   ) {
-    return this.ingredientsService.findAll(page, limit);
+    return this.ingredientsService.findAll(page, limit, search, category);
   }
 
   @Get('search')
-  search(
+  @ApiQuery({
+    name: 'q',
+    required: true,
+    type: String,
+    description: 'Search query',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Maximum results (default: 10)',
+  })
+  async search(
     @Query('q') query: string,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
   ) {
@@ -84,24 +127,50 @@ export class IngredientsController {
   }
 
   @Get('common')
-  findCommon() {
+  async findCommon() {
     return this.ingredientsService.getCommonIngredients();
   }
 
   @Get('categories')
-  getCategories() {
+  async getCategories() {
     return this.ingredientsService.getCategories();
   }
 
+  @Get('categories/:category')
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Items per page (default: 50)',
+  })
+  async findByCategory(
+    @Param('category') category: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit = 50,
+  ) {
+    return this.ingredientsService.findByCategory(category, page, limit);
+  }
+
+  @Get('categories/:category/common')
+  async findCommonByCategory(@Param('category') category: string) {
+    return this.ingredientsService.getCommonIngredientsByCategory(category);
+  }
+
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string) {
     return this.ingredientsService.findOne(id);
   }
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  update(
+  async update(
     @Param('id') id: string,
     @Body() updateIngredientDto: UpdateIngredientDto,
   ) {
@@ -111,7 +180,7 @@ export class IngredientsController {
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string) {
     return this.ingredientsService.remove(id);
   }
 }

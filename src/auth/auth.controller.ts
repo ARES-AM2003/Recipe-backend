@@ -1,5 +1,14 @@
-import { 
-  Body, Controller, Get, Post, Req, Res, UsePipes, ValidationPipe, HttpException, HttpStatus 
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  Res,
+  UsePipes,
+  ValidationPipe,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
@@ -55,36 +64,37 @@ export class AuthController {
   //   }
   // }
   @Public()
-@Post('register')
-async register(
-  @Body() registerDto: RegisterDto,
-  @Res({ passthrough: true }) response: Response,
-) {
-  try {
-    const { user, accessToken, refreshToken } = await this.authService.register(registerDto);
+  @Post('register')
+  async register(
+    @Body() registerDto: RegisterDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    try {
+      const { user, accessToken, refreshToken } =
+        await this.authService.register(registerDto);
 
-    response.cookie('Authentication', accessToken, {
-      httpOnly: true,
-      path: '/',
-      maxAge: 15 * 60 * 1000,
-      sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
-    });
+      response.cookie('Authentication', accessToken, {
+        httpOnly: true,
+        path: '/',
+        maxAge: 15 * 60 * 1000,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+      });
 
-    response.cookie('Refresh', refreshToken, {
-      httpOnly: true,
-      path: '/auth/refresh',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      sameSite: 'strict',
-      secure: process.env.NODE_ENV === 'production',
-    });
+      response.cookie('Refresh', refreshToken, {
+        httpOnly: true,
+        path: '/auth/refresh',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        sameSite: 'strict',
+        secure: process.env.NODE_ENV === 'production',
+      });
 
-    return { message: 'Registration successful', user };
-  } catch (error) {
-    console.error('Register error:', error);
-    throw new HttpException('Registration failed', HttpStatus.BAD_REQUEST);
+      return { message: 'Registration successful', user };
+    } catch (error) {
+      console.error('Register error:', error);
+      throw new HttpException('Registration failed', HttpStatus.BAD_REQUEST);
+    }
   }
-}
 
   @Public()
   @Post('login')
@@ -93,7 +103,8 @@ async register(
     @Res({ passthrough: true }) response: Response,
   ) {
     try {
-      const { accessToken, refreshToken, user } = await this.authService.login(loginDto);
+      const { accessToken, refreshToken, user } =
+        await this.authService.login(loginDto);
 
       response.cookie('Authentication', accessToken, {
         httpOnly: true,
@@ -123,7 +134,7 @@ async register(
   @Post('logout')
   async logout(
     @CurrentUser() user: User,
-    @Res({ passthrough: true }) response: Response
+    @Res({ passthrough: true }) response: Response,
   ) {
     try {
       // await this.authService.logout(user.id);
@@ -134,24 +145,34 @@ async register(
       return { message: 'Successfully logged out' };
     } catch (error) {
       console.error('Logout error:', error);
-      throw new HttpException('Logout failed', HttpStatus.INTERNAL_SERVER_ERROR);
+      throw new HttpException(
+        'Logout failed',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 
-  
+  @Public()
   @Post('refresh')
   async refresh(
     @Req() req: Request,
-    @Res({ passthrough: true }) response: Response
+    @Res({ passthrough: true }) response: Response,
   ) {
     try {
-      const refreshToken = req.cookies?.Refresh;
+      const refreshToken = req.cookies?.Refresh as any;
       console.log(refreshToken);
       if (!refreshToken) {
-        throw new HttpException('Refresh token not found', HttpStatus.UNAUTHORIZED);
+        throw new HttpException(
+          'Refresh token not found',
+          HttpStatus.UNAUTHORIZED,
+        );
       }
 
-      const { accessToken, refreshToken: newRefreshToken, user } = await this.authService.refreshTokens(refreshToken);
+      const {
+        accessToken,
+        refreshToken: newRefreshToken,
+        user,
+      } = await this.authService.refreshTokens(refreshToken);
 
       response.cookie('Authentication', accessToken, {
         httpOnly: true,
@@ -164,27 +185,29 @@ async register(
       if (newRefreshToken) {
         response.cookie('Refresh', newRefreshToken, {
           httpOnly: true,
-          path: '/auth/refresh',
+          path: '/',
           maxAge: 7 * 24 * 60 * 60 * 1000,
           sameSite: 'strict',
           secure: process.env.NODE_ENV === 'production',
         });
       }
 
-      return { user:user,
-        accessToken,
-        
-      };
+      return { user: user, accessToken };
     } catch (error) {
       console.error('Refresh error:', error);
-      throw new HttpException('Could not refresh token', HttpStatus.UNAUTHORIZED);
+      throw new HttpException(
+        'Could not refresh token',
+        HttpStatus.UNAUTHORIZED,
+      );
     }
   }
 
   @Auth()
   @ApiBearerAuth('JWT')
   @Get('me')
-  @UsePipes(new ValidationPipe({ skipMissingProperties: true, whitelist: true }))
+  @UsePipes(
+    new ValidationPipe({ skipMissingProperties: true, whitelist: true }),
+  )
   getCurrentUser(@Req() req: any) {
     return req.user;
   }
