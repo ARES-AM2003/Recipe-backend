@@ -7,6 +7,7 @@ import {
   Body,
   Request,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
 import { RecommendationService } from './recommendation.service';
 import { RecommendationRequestDto } from './dto/recommendation-request.dto';
@@ -18,15 +19,19 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { RecommendationResponseDto } from './dto/recommendation-response.dto';
+import { Auth } from 'src/auth/decorators/auth.decorator';
 
 // @ApiTags('recommendations')
-// @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+
+@Auth()
+@ApiBearerAuth('JWT')
 @Controller('recommendations')
 export class RecommendationController {
   constructor(private readonly recommendationService: RecommendationService) {}
 
   @Get()
+  @Auth()
+  @ApiBearerAuth('JWT')
   @ApiOperation({ summary: 'Get recipe recommendations' })
   @ApiResponse({
     status: 200,
@@ -34,16 +39,17 @@ export class RecommendationController {
     type: RecommendationResponseDto,
   })
   async getRecommendations(
-    @Request() req,
+    @Req() req: any,
     @Query() query: RecommendationRequestDto,
   ): Promise<RecommendationResponseDto> {
+    console.log(req.user);
     if (!query.ingredientIds?.length && !query.includeCollaborative) {
       throw new BadRequestException(
         'At least one ingredient ID is required when collaborative filtering is disabled',
       );
     }
 
-    return this.recommendationService.getRecommendations(req.user.id, query);
+    return this.recommendationService.getRecommendations(req.user?.id, query);
   }
 
   @Post()
@@ -56,8 +62,10 @@ export class RecommendationController {
       'Returns a list of recommended recipes based on the provided criteria',
     type: RecommendationResponseDto,
   })
+  @ApiBearerAuth('JWT')
+  @Auth()
   async getRecommendationsPost(
-    @Request() req,
+    @Req() req: any,
     @Body() body: RecommendationRequestDto,
   ): Promise<RecommendationResponseDto> {
     if (!body.ingredientIds?.length && !body.includeCollaborative) {
@@ -70,6 +78,8 @@ export class RecommendationController {
   }
 
   @Get('content')
+  @ApiBearerAuth('JWT')
+  @Auth()
   @ApiOperation({ summary: 'Get content-based recommendations' })
   @ApiResponse({
     status: 200,
@@ -77,7 +87,7 @@ export class RecommendationController {
     type: RecommendationResponseDto,
   })
   async getContentBasedRecommendations(
-    @Request() req,
+    @Req() req: any,
     @Query('ingredients') ingredientIds: string,
     @Query('limit') limit = '10',
   ): Promise<RecommendationResponseDto> {
@@ -95,6 +105,8 @@ export class RecommendationController {
   }
 
   @Get('collaborative')
+  @ApiBearerAuth('JWT')
+  @Auth()
   @ApiOperation({ summary: 'Get collaborative filtering recommendations' })
   @ApiResponse({
     status: 200,
@@ -103,7 +115,7 @@ export class RecommendationController {
     type: RecommendationResponseDto,
   })
   async getCollaborativeRecommendations(
-    @Request() req,
+    @Req() req: any,
     @Query('limit') limit = '10',
   ): Promise<RecommendationResponseDto> {
     return this.recommendationService.getRecommendations(req.user.id, {
@@ -115,6 +127,8 @@ export class RecommendationController {
   }
 
   @Get('hybrid')
+  @ApiBearerAuth('JWT')
+  @Auth()
   @ApiOperation({ summary: 'Get hybrid recommendations' })
   @ApiResponse({
     status: 200,
@@ -122,7 +136,7 @@ export class RecommendationController {
     type: RecommendationResponseDto,
   })
   async getHybridRecommendations(
-    @Request() req,
+    @Req() req: any,
     @Query('ingredients') ingredientIds: string,
     @Query('limit') limit = '10',
   ): Promise<RecommendationResponseDto> {

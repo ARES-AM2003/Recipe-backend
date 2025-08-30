@@ -41,8 +41,8 @@ export class CreateRecipeDto {
 
   @IsArray()
   @IsString({ each: true })
-  @IsNotEmpty({ each: true })
-  instructions: string[];
+  @IsOptional()
+  instructions?: string[];
 
   @IsNumber()
   @Min(1)

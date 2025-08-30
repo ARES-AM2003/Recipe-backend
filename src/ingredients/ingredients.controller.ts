@@ -27,6 +27,8 @@ import {
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import * as XLSX from 'xlsx';
+import { Auth } from 'src/auth/decorators/auth.decorator';
+import { Public } from 'src/auth/decorators/public.decorator';
 
 @ApiTags('ingredients')
 @Controller('ingredients')
@@ -34,8 +36,8 @@ export class IngredientsController {
   constructor(private readonly ingredientsService: IngredientsService) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @Auth()
+  @ApiBearerAuth('JWT')
   async create(@Body() createIngredientDto: CreateIngredientDto) {
     return this.ingredientsService.create(createIngredientDto);
   }
@@ -97,6 +99,7 @@ export class IngredientsController {
     type: String,
     description: 'Filter by category',
   })
+  @Public()
   async findAll(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 1000,
@@ -119,6 +122,7 @@ export class IngredientsController {
     type: Number,
     description: 'Maximum results (default: 10)',
   })
+  @Public()
   async search(
     @Query('q') query: string,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
@@ -127,11 +131,13 @@ export class IngredientsController {
   }
 
   @Get('common')
+  @Public()
   async findCommon() {
     return this.ingredientsService.getCommonIngredients();
   }
 
   @Get('categories')
+  @Public()
   async getCategories() {
     return this.ingredientsService.getCategories();
   }
@@ -149,6 +155,7 @@ export class IngredientsController {
     type: Number,
     description: 'Items per page (default: 50)',
   })
+  @Public()
   async findByCategory(
     @Param('category') category: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
@@ -158,18 +165,20 @@ export class IngredientsController {
   }
 
   @Get('categories/:category/common')
+  @Public()
   async findCommonByCategory(@Param('category') category: string) {
     return this.ingredientsService.getCommonIngredientsByCategory(category);
   }
 
   @Get(':id')
+  @Public()
   async findOne(@Param('id') id: string) {
     return this.ingredientsService.findOne(id);
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @Auth()
+  @ApiBearerAuth('JWT')
   async update(
     @Param('id') id: string,
     @Body() updateIngredientDto: UpdateIngredientDto,
@@ -178,8 +187,8 @@ export class IngredientsController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @Auth()
+  @ApiBearerAuth('JWT')
   async remove(@Param('id') id: string) {
     return this.ingredientsService.remove(id);
   }

@@ -9,12 +9,14 @@ import {
 import { ApiTags, ApiQuery, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { IngredientsService } from './ingredients.service';
 import { IngredientCategory } from './entities/ingredient.entity';
+import { Public } from 'src/auth/decorators/public.decorator';
 
 @ApiTags('ingredient-categories')
 @Controller('ingredients/categories')
 export class CategoriesController {
   constructor(private readonly ingredientsService: IngredientsService) {}
 
+  @Public()
   @Get()
   @ApiOperation({ summary: 'Get all available ingredient categories' })
   @ApiResponse({
@@ -39,6 +41,7 @@ export class CategoriesController {
     };
   }
 
+  @Public()
   @Get('enum')
   @ApiOperation({ summary: 'Get all predefined ingredient category enums' })
   @ApiResponse({
@@ -55,7 +58,7 @@ export class CategoriesController {
       },
     },
   })
-  async getCategoryEnums() {
+  getCategoryEnums() {
     const categories = Object.values(IngredientCategory);
     return {
       categories,
@@ -63,6 +66,7 @@ export class CategoriesController {
     };
   }
 
+  @Public()
   @Get(':category')
   @ApiOperation({ summary: 'Get ingredients by category' })
   @ApiQuery({
@@ -89,6 +93,7 @@ export class CategoriesController {
     return this.ingredientsService.findByCategory(category, page, limit);
   }
 
+  @Public()
   @Get(':category/common')
   @ApiOperation({ summary: 'Get common ingredients by category' })
   @ApiResponse({
@@ -105,6 +110,7 @@ export class CategoriesController {
     };
   }
 
+  @Public()
   @Get(':category/stats')
   @ApiOperation({ summary: 'Get statistics for ingredients in a category' })
   @ApiResponse({

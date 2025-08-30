@@ -18,10 +18,11 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
+import { Auth } from 'src/auth/decorators/auth.decorator';
 
 @ApiTags('nutrition')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT')
+@Auth()
 @Controller('nutrition')
 export class NutritionController {
   constructor(private readonly nutritionService: NutritionService) {}

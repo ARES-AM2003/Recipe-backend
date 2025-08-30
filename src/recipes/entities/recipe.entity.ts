@@ -25,6 +25,12 @@ export enum CuisineType {
   OTHER = 'Other',
 }
 
+export enum DifficultyLevel {
+  EASY = 'Easy',
+  MEDIUM = 'Medium',
+  HARD = 'Hard',
+}
+
 export enum MealType {
   BREAKFAST = 'Breakfast',
   LUNCH = 'Lunch',
@@ -45,6 +51,9 @@ export class Recipe {
 
   @Column('text')
   description: string;
+
+  @Column({ enum: DifficultyLevel, default: DifficultyLevel.EASY })
+  difficulty: DifficultyLevel;
 
   @Column('text', { array: true })
   instructions: string[];

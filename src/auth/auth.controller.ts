@@ -105,24 +105,23 @@ export class AuthController {
     try {
       const { accessToken, refreshToken, user } =
         await this.authService.login(loginDto);
-
       response.cookie('Authentication', accessToken, {
         httpOnly: true,
         path: '/',
-        maxAge: 15 * 60 * 1000,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === 'production',
+        maxAge: 15 * 60 * 1000, // 15 minutes
+        sameSite: 'lax', // less strict, works better for local dev
+        secure: false, // allow on http://localhost
       });
 
       response.cookie('Refresh', refreshToken, {
         httpOnly: true,
         path: '/',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === 'production',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        sameSite: 'lax',
+        secure: false,
       });
 
-      return { message: 'Login successful', user };
+      return { message: 'Login successful', user, accessToken };
     } catch (error) {
       console.error('Login error:', error);
       throw new HttpException('Invalid credentials', HttpStatus.UNAUTHORIZED);
@@ -177,18 +176,18 @@ export class AuthController {
       response.cookie('Authentication', accessToken, {
         httpOnly: true,
         path: '/',
-        maxAge: 15 * 60 * 1000,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === 'production',
+        maxAge: 15 * 60 * 1000, // 15 minutes
+        sameSite: 'none', // less strict, works better for local dev
+        secure: false, // allow on http://localhost
       });
 
       if (newRefreshToken) {
         response.cookie('Refresh', newRefreshToken, {
           httpOnly: true,
           path: '/',
-          maxAge: 7 * 24 * 60 * 60 * 1000,
-          sameSite: 'strict',
-          secure: process.env.NODE_ENV === 'production',
+          maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+          sameSite: 'none',
+          secure: false,
         });
       }
 

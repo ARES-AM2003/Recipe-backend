@@ -75,10 +75,8 @@ export class RecipesService {
   async findAll(
     page = 1,
     limit = 10,
-    relations: RecipeRelations = {},
   ): Promise<{ data: Recipe[]; count: number }> {
     const [data, count] = await this.recipesRepository.findAndCount({
-      relations: this.getDefaultRelations(relations),
       skip: (page - 1) * limit,
       take: limit,
       order: { createdAt: 'DESC' },
@@ -198,5 +196,23 @@ export class RecipesService {
       .getManyAndCount();
 
     return { data: results, count };
+  }
+
+  async findMyRecipes(userId: string, page = 1, limit = 10) {
+    const [results, count] = await this.recipesRepository.findAndCount({
+      where: { authorId: userId },
+      relations: ['author', 'ingredients'],
+      skip: (page - 1) * limit, // skip previous pages
+      take: limit, // limit per page
+      order: { createdAt: 'DESC' }, // optional: sort newest first
+    });
+
+    return {
+      data: results,
+      total: count,
+      page,
+      limit,
+      totalPages: Math.ceil(count / limit),
+    };
   }
 }

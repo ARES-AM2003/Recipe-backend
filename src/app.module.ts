@@ -19,6 +19,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ValidationPipe as CustomValidationPipe } from './common/pipes/validation.pipe';
+import { RecommendationVecModule } from './recommendation-vec/recommendation-vec.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { ValidationPipe as CustomValidationPipe } from './common/pipes/validatio
     RecommendationModule,
     NutritionModule,
     DatabaseModule,
+    RecommendationVecModule,
   ],
   controllers: [AppController],
   providers: [

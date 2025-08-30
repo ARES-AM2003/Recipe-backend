@@ -27,12 +27,14 @@ import {
 import { Auth } from 'src/auth/decorators/auth.decorator';
 
 @ApiTags('pantry')
-@ApiBearerAuth()
+@ApiBearerAuth('JWT')
 @Auth()
 @Controller('pantry')
 export class PantryController {
   constructor(private readonly pantryService: PantryService) {}
 
+  @ApiBearerAuth('JWT')
+  @Auth()
   @Post('items')
   @ApiOperation({ summary: 'Add an item to the pantry' })
   async addItem(@Req() req: any, @Body() addPantryItemDto: AddPantryItemDto) {
@@ -40,6 +42,8 @@ export class PantryController {
     return await this.pantryService.addItem(user, addPantryItemDto);
   }
 
+  @ApiBearerAuth('JWT')
+  @Auth()
   @Get('items')
   @ApiOperation({ summary: 'Get all items in the pantry' })
   @ApiQuery({
@@ -109,12 +113,16 @@ export class PantryController {
   }
 
   @Get('items/:id')
+  @ApiBearerAuth('JWT')
+  @Auth()
   @ApiOperation({ summary: 'Get a specific pantry item' })
   async findOne(@Req() req: any, @Param('id') id: string) {
     return await this.pantryService.findOne(req.user.id, id);
   }
 
   @Patch('items/:id')
+  @ApiBearerAuth('JWT')
+  @Auth()
   @ApiOperation({ summary: 'Update a pantry item' })
   async update(
     @Req() req: any,
@@ -130,12 +138,16 @@ export class PantryController {
   }
 
   @Delete('items/:id')
+  @ApiBearerAuth('JWT')
+  @Auth()
   @ApiOperation({ summary: 'Remove an item from the pantry' })
   async remove(@Req() req: any, @Param('id') id: string) {
     return await this.pantryService.remove(req.user.id, id);
   }
 
   @Get('summary')
+  @ApiBearerAuth('JWT')
+  @Auth()
   @ApiOperation({ summary: 'Get pantry summary' })
   async getSummary(@Req() req: any) {
     return await this.pantryService.getPantrySummary(req.user.id);

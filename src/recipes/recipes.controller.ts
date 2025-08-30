@@ -12,6 +12,7 @@ import {
   BadRequestException,
   ParseIntPipe,
   DefaultValuePipe,
+  ParseFloatPipe,
 } from '@nestjs/common';
 import { RecipesService } from './recipes.service';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
@@ -20,8 +21,14 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Request } from 'express';
 import { User } from '../users/entities/user.entity';
 import { GetUser } from '../common/decorators/get-user.decorator';
-import { ApiBearerAuth, ApiBody, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { Auth } from 'src/auth/decorators/auth.decorator';
+import { Public } from 'src/auth/decorators/public.decorator';
 
 export interface RequestWithUser extends Request {
   user: User;
@@ -37,15 +44,24 @@ export class RecipesController {
   async create(@Body() createRecipeDto: CreateRecipeDto, @Req() req: any) {
     return await this.recipesService.create(createRecipeDto, req.user);
   }
-
+  @Auth()
+  @ApiBearerAuth('JWT')
+  @Get('mine')
+  async findMyRecipes(@Req() req: any) {
+    // const user = req.user as User;
+    return await this.recipesService.findMyRecipes(req.user.id);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+  @Public()
   @Get()
   async findAll(
-    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page = 1,
-    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit = 10,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
   ) {
     return this.recipesService.findAll(page, limit);
   }
 
+  @Public()
   @Get('search')
   async search(
     @Query('q') query: string,
@@ -58,6 +74,7 @@ export class RecipesController {
     return this.recipesService.searchRecipes(query, page, limit);
   }
 
+  @Public()
   @Post('by-ingredients')
   @ApiOperation({ summary: 'Find recipes by ingredient IDs' })
   @ApiBody({
@@ -95,15 +112,16 @@ export class RecipesController {
 
     return this.recipesService.findByIngredients(ingredients, page, limit);
   }
-
+  @Public()
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return await this.recipesService.findOne(id);
   }
 
   @Patch(':id')
-  @UseGuards(JwtAuthGuard)
-  update(
+  @Auth()
+  @ApiBearerAuth('JWT')
+  async update(
     @Param('id') id: string,
     @Body() updateRecipeDto: UpdateRecipeDto,
     @GetUser() user: User,
@@ -112,7 +130,8 @@ export class RecipesController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard)
+  @Auth()
+  @ApiBearerAuth('JWT')
   remove(@Param('id') id: string, @GetUser() user: User) {
     return this.recipesService.remove(id, user.id);
   }
