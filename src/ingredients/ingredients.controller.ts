@@ -30,6 +30,7 @@ import * as XLSX from 'xlsx';
 import { Auth } from 'src/auth/decorators/auth.decorator';
 import { Public } from 'src/auth/decorators/public.decorator';
 
+@Public()
 @ApiTags('ingredients')
 @Controller('ingredients')
 export class IngredientsController {
@@ -42,6 +43,7 @@ export class IngredientsController {
     return this.ingredientsService.create(createIngredientDto);
   }
 
+  @Public()
   @Post('upload')
   // @ApiBearerAuth()
   @UseInterceptors(FileInterceptor('file'))

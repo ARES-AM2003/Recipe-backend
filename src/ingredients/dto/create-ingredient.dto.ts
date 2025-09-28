@@ -1,4 +1,12 @@
-import { IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, IsUrl, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Min,
+} from 'class-validator';
 import { IngredientCategory } from '../entities/ingredient.entity';
 
 export class CreateIngredientDto {

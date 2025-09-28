@@ -15,7 +15,31 @@ import { Public } from 'src/auth/decorators/public.decorator';
 @Controller('ingredients/categories')
 export class CategoriesController {
   constructor(private readonly ingredientsService: IngredientsService) {}
-
+  @Public()
+  @Get('enum')
+  @ApiOperation({ summary: 'Get all predefined ingredient category enums' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of all predefined category enums',
+    schema: {
+      type: 'object',
+      properties: {
+        categories: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        count: { type: 'number' },
+      },
+    },
+  })
+  async getCategoryEnums() {
+    const categories = Object.values(IngredientCategory);
+    console.log(categories);
+    return {
+      categories,
+      count: categories.length,
+    };
+  }
   @Public()
   @Get()
   @ApiOperation({ summary: 'Get all available ingredient categories' })
@@ -35,31 +59,6 @@ export class CategoriesController {
   })
   async getAllCategories() {
     const categories = await this.ingredientsService.getCategories();
-    return {
-      categories,
-      count: categories.length,
-    };
-  }
-
-  @Public()
-  @Get('enum')
-  @ApiOperation({ summary: 'Get all predefined ingredient category enums' })
-  @ApiResponse({
-    status: 200,
-    description: 'List of all predefined category enums',
-    schema: {
-      type: 'object',
-      properties: {
-        categories: {
-          type: 'array',
-          items: { type: 'string' },
-        },
-        count: { type: 'number' },
-      },
-    },
-  })
-  getCategoryEnums() {
-    const categories = Object.values(IngredientCategory);
     return {
       categories,
       count: categories.length,

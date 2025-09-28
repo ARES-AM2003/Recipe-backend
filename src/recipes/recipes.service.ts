@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, FindManyOptions, Brackets } from 'typeorm';
+import { Repository, In, Brackets } from 'typeorm';
 import { Recipe } from './entities/recipe.entity';
 import { User } from '../users/entities/user.entity';
 import { CreateRecipeDto } from './dto/create-recipe.dto';
@@ -115,9 +115,7 @@ export class RecipesService {
     // Update ingredients if provided
     if (ingredientsData) {
       const ingredientIds = ingredientsData.map((item) => item.ingredientId);
-      const ingredients = await this.validateAndGetIngredients(
-        ingredientIds as string[],
-      );
+      const ingredients = await this.validateAndGetIngredients(ingredientIds);
       recipe.ingredients = ingredients;
     }
 
@@ -142,8 +140,9 @@ export class RecipesService {
     const recipe = await this.findOne(recipeId);
 
     // In a real app, you might want to track likes in a separate table
-    // This is a simplified version
-    // recipe.likesCount = (recipe.likesCount || 0) + 1;
+    // This is a simplified version using userId for potential future implementation
+    // For now, we'll just return the recipe
+    console.log(`User ${userId} liked recipe ${recipeId}`);
 
     return this.recipesRepository.save(recipe);
   }

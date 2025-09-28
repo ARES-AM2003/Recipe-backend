@@ -35,7 +35,8 @@ export class RecommendationVecService implements OnModuleInit {
     if (this.embeddingsLoaded) return;
 
     const embeddingPath = path.resolve(
-      '/home/ares-am/Projects/windsurf/recipie/recipe-recommendation-api/src/ingredients/ingredents-embeddings/ingredient_embeddings.json',
+      __dirname,
+      '../../ingredients/ingredents-embeddings/ingredient_embeddings.json',
     );
 
     if (!fs.existsSync(embeddingPath)) {

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RecipesService } from './recipes.service';
+import { RecipeFilterService } from './recipe-filter.service';
 import { RecipesController } from './recipes.controller';
 import { Recipe } from './entities/recipe.entity';
 import { User } from '../users/entities/user.entity';
@@ -15,7 +16,7 @@ import { IngredientsModule } from '../ingredients/ingredients.module';
     IngredientsModule,
   ],
   controllers: [RecipesController],
-  providers: [RecipesService],
+  providers: [RecipesService, RecipeFilterService],
   exports: [RecipesService],
 })
 export class RecipesModule {}

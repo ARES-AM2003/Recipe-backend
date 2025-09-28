@@ -10,7 +10,11 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CuisineType, MealType } from '../entities/recipe.entity';
+import {
+  CuisineType,
+  DifficultyLevel,
+  MealType,
+} from '../entities/recipe.entity';
 
 export class IngredientAmountDto {
   @IsString()
@@ -38,6 +42,10 @@ export class CreateRecipeDto {
   @IsString()
   @IsNotEmpty()
   description: string;
+
+  @IsOptional()
+  @IsEnum(DifficultyLevel)
+  difficulty?: DifficultyLevel;
 
   @IsArray()
   @IsString({ each: true })

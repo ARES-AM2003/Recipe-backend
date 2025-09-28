@@ -2,11 +2,16 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-# Install only dependencies needed for build
+# Install build dependencies for native modules
+RUN apk add --no-cache python3 make g++
+
+# Copy only package files first (better caching)
 COPY package.json package-lock.json* ./
+
+# Install deps (with legacy peer deps for compatibility)
 RUN npm install --legacy-peer-deps
 
-# Copy source and build
+# Copy source code and build
 COPY . .
 RUN npm run build
 
@@ -14,17 +19,17 @@ RUN npm run build
 FROM oven/bun:slim
 WORKDIR /app
 
-# Copy only built artifacts
+# Copy built artifacts
 COPY --from=build /app/dist ./dist
 
-# Copy only production dependencies
+# Copy package manifests
 COPY package.json bun.lockb* ./
 
-# Install only production dependencies
+# Install only production dependencies (skip scripts for safety)
 RUN bun install --production --ignore-scripts
 
-# Expose port
+# Expose app port
 EXPOSE 3000
 
-# Run app
+# Run the app
 CMD ["bun", "dist/src/main.js"]
