@@ -1,9 +1,16 @@
-import { IsArray, IsBoolean, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RecommendationRequestDto {
   @ApiProperty({
-    description: 'List of ingredient IDs to use for content-based recommendations',
+    description:
+      'List of ingredient IDs to use for content-based recommendations',
     required: false,
     type: [String],
   })
@@ -79,4 +86,14 @@ export class RecommendationRequestDto {
   @IsNumber()
   @IsOptional()
   maxFat?: number;
+
+  @ApiProperty({
+    description:
+      'Minimum score threshold for collaborative recommendations (0-1)',
+    required: false,
+    default: 0.3,
+  })
+  @IsNumber()
+  @IsOptional()
+  minCosineSimilarity?: number;
 }

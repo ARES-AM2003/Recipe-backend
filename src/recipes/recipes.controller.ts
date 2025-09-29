@@ -131,9 +131,9 @@ export class RecipesController {
   async update(
     @Param('id') id: string,
     @Body() updateRecipeDto: UpdateRecipeDto,
-    @GetUser() user: User,
+    @Req() req: any,
   ) {
-    return this.recipesService.update(id, updateRecipeDto, user.id);
+    return this.recipesService.update(id, updateRecipeDto, req.user.id);
   }
 
   @Delete(':id')

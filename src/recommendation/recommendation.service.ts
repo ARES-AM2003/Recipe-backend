@@ -5,7 +5,10 @@ import { Recipe } from '../recipes/entities/recipe.entity';
 import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { RecommendationRequestDto } from './dto/recommendation-request.dto';
-import { RecommendationResponseDto, RecommendationItemDto } from './dto/recommendation-response.dto';
+import {
+  RecommendationResponseDto,
+  RecommendationItemDto,
+} from './dto/recommendation-response.dto';
 import * as natural from 'natural';
 import * as tf from '@tensorflow/tfjs-node';
 import { ConfigService } from '@nestjs/config';
@@ -15,12 +18,30 @@ type RecipeVector = {
   vector: number[];
 };
 
+interface UserSimilarity {
+  userId: string;
+  similarity: number;
+  commonLikes: number;
+}
+
+interface UserLikeMatrix {
+  [userId: string]: Set<string>; // Set of liked recipe IDs
+}
+
+interface CollaborativeFilters {
+  minScore?: number;
+}
+
 @Injectable()
 export class RecommendationService {
   private readonly logger = new Logger(RecommendationService.name);
   private tfidf: natural.TfIdf;
   private recipeVectors: RecipeVector[] = [];
   private model: tf.LayersModel | null = null;
+  private userLikeMatrix: UserLikeMatrix = {};
+  private lastMatrixUpdate: Date = new Date(0);
+  private readonly MATRIX_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+  private readonly MIN_COLLABORATIVE_SCORE = 0.6; // Default minimum score for collaborative recommendations
 
   constructor(
     @InjectRepository(Recipe)
@@ -67,15 +88,21 @@ export class RecommendationService {
 
       // Load or initialize collaborative filtering model
       await this.loadCollaborativeModel();
+      await this.updateUserLikeMatrix();
 
-      this.logger.log(`Recommendation engine initialized with ${this.recipeVectors.length} recipes`);
+      this.logger.log(
+        `Recommendation engine initialized with ${this.recipeVectors.length} recipes`,
+      );
     } catch (error) {
-      this.logger.error('Error initializing recommendation engine', error.stack);
+      this.logger.error(
+        'Error initializing recommendation engine',
+        error.stack,
+      );
     }
   }
 
   private async processBatch(recipes: Recipe[]) {
-    const promises = recipes.map(recipe => this.processRecipe(recipe));
+    const promises = recipes.map((recipe) => this.processRecipe(recipe));
     await Promise.all(promises);
   }
 
@@ -85,8 +112,8 @@ export class RecommendationService {
         recipe.title,
         recipe.description,
         ...recipe.instructions,
-        ...recipe.tags || [],
-        ...recipe.ingredients.map(i => i.name),
+        ...(recipe.tags || []),
+        ...recipe.ingredients.map((i) => i.name),
       ].join(' ');
 
       this.tfidf.addDocument(text);
@@ -120,25 +147,107 @@ export class RecommendationService {
 
   private cosineSimilarity(vecA: number[], vecB: number[]): number {
     if (vecA.length !== vecB.length) return 0;
-    
-    const dotProduct = vecA.reduce((sum, val, i) => sum + val * (vecB[i] || 0), 0);
+
+    const dotProduct = vecA.reduce(
+      (sum, val, i) => sum + val * (vecB[i] || 0),
+      0,
+    );
     const magnitudeA = Math.sqrt(vecA.reduce((sum, val) => sum + val * val, 0));
     const magnitudeB = Math.sqrt(vecB.reduce((sum, val) => sum + val * val, 0));
-    
+
     if (magnitudeA === 0 || magnitudeB === 0) return 0;
     return dotProduct / (magnitudeA * magnitudeB);
   }
 
+  private jaccardSimilarity(setA: Set<string>, setB: Set<string>): number {
+    const intersection = new Set([...setA].filter((x) => setB.has(x)));
+    const union = new Set([...setA, ...setB]);
+
+    if (union.size === 0) return 0;
+    return intersection.size / union.size;
+  }
+
+  private async updateUserLikeMatrix() {
+    try {
+      const now = new Date();
+      if (
+        now.getTime() - this.lastMatrixUpdate.getTime() <
+        this.MATRIX_CACHE_DURATION
+      ) {
+        return; // Use cached matrix
+      }
+
+      this.logger.log('Updating user-like matrix...');
+
+      const users = await this.userRepository.find({
+        relations: ['likedRecipes'],
+        select: ['id'],
+      });
+
+      this.userLikeMatrix = {};
+
+      for (const user of users) {
+        this.userLikeMatrix[user.id] = new Set(
+          user.likedRecipes?.map((recipe) => recipe.id) || [],
+        );
+      }
+
+      this.lastMatrixUpdate = now;
+      this.logger.log(`Updated user-like matrix for ${users.length} users`);
+    } catch (error) {
+      this.logger.error('Error updating user-like matrix', error.stack);
+    }
+  }
+
+  private async findSimilarUsers(
+    userId: string,
+    limit: number = 10,
+  ): Promise<UserSimilarity[]> {
+    await this.updateUserLikeMatrix();
+
+    const targetUserLikes = this.userLikeMatrix[userId];
+    if (!targetUserLikes || targetUserLikes.size === 0) {
+      this.logger.warn(`No likes found for user ${userId}`);
+      return [];
+    }
+
+    const similarities: UserSimilarity[] = [];
+
+    for (const [otherUserId, otherUserLikes] of Object.entries(
+      this.userLikeMatrix,
+    )) {
+      if (otherUserId === userId || otherUserLikes.size === 0) continue;
+
+      const similarity = this.jaccardSimilarity(
+        targetUserLikes,
+        otherUserLikes,
+      );
+      const commonLikes = new Set(
+        [...targetUserLikes].filter((x) => otherUserLikes.has(x)),
+      ).size;
+
+      if (similarity > 0 && commonLikes >= 2) {
+        // Require at least 2 common likes
+        similarities.push({
+          userId: otherUserId,
+          similarity,
+          commonLikes,
+        });
+      }
+    }
+
+    return similarities
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
+  }
+
   private async loadCollaborativeModel() {
     try {
-      // In a real app, load a pre-trained model from disk or a model server
-      // For now, we'll use a simple matrix factorization approach
       this.logger.log('Initializing collaborative filtering model...');
-      
-      // This is a placeholder for a real model
-      // In production, you would load a pre-trained model here
+
+      // For now, we use user-based collaborative filtering
+      // In production, you could load a pre-trained matrix factorization model here
       this.model = null;
-      
     } catch (error) {
       this.logger.error('Error loading collaborative model', error.stack);
       this.model = null;
@@ -155,31 +264,31 @@ export class RecommendationService {
       const ingredients = await this.ingredientRepository.find({
         where: { id: In(ingredientIds) },
       });
-      
+
       if (ingredients.length === 0) {
         return [];
       }
-      
+
       // Create a query string from ingredients
-      const queryText = ingredients.map(i => i.name).join(' ');
+      const queryText = ingredients.map((i) => i.name).join(' ');
       const queryVector = this.getTfidfVector(queryText);
-      
+
       // Calculate similarity scores
       const scoredRecipes = this.recipeVectors
-        .filter(rv => !excludeRecipeIds.includes(rv.recipe.id))
-        .map(rv => ({
+        .filter((rv) => !excludeRecipeIds.includes(rv.recipe.id))
+        .map((rv) => ({
           recipe: rv.recipe,
           score: this.cosineSimilarity(queryVector, rv.vector),
         }))
-        .filter(item => item.score > 0) // Filter out zero-similarity recipes
+        .filter((item) => item.score > 0) // Filter out zero-similarity recipes
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
-      
-      return scoredRecipes.map(item => ({
+
+      return scoredRecipes.map((item) => ({
         recipe: item.recipe,
         score: item.score,
         type: 'content' as const,
-        reason: `Similar to ingredients: ${ingredients.map(i => i.name).join(', ')}`,
+        reason: `Similar to ingredients: ${ingredients.map((i) => i.name).join(', ')}`,
       }));
     } catch (error) {
       this.logger.error('Error in content-based recommendations', error.stack);
@@ -191,26 +300,138 @@ export class RecommendationService {
     userId: string,
     limit: number,
     excludeRecipeIds: string[] = [],
+    filters: CollaborativeFilters = {},
   ): Promise<RecommendationItemDto[]> {
     try {
-      // In a real app, use the collaborative filtering model
-      // For now, return popular recipes the user hasn't interacted with
-      const popularRecipes = await this.recipeRepository.find({
-        where: { id: Not(In(excludeRecipeIds)) },
-        order: { averageRating: 'DESC', reviewCount: 'DESC' },
-        take: limit,
+      // Find users with similar preferences
+      const similarUsers = await this.findSimilarUsers(userId, 20);
+
+      if (similarUsers.length === 0) {
+        this.logger.warn(
+          `No similar users found for user ${userId}, falling back to popular recipes`,
+        );
+        return this.getFallbackRecommendations(limit, excludeRecipeIds);
+      }
+
+      this.logger.log(
+        `Found ${similarUsers.length} similar users for collaborative filtering`,
+      );
+
+      // Get recipes liked by similar users but not by current user
+      const targetUserLikes = this.userLikeMatrix[userId] || new Set();
+      const candidateRecipes = new Map<
+        string,
+        { score: number; reason: string[] }
+      >();
+
+      for (const similarUser of similarUsers) {
+        const similarUserLikes = this.userLikeMatrix[similarUser.userId];
+        if (!similarUserLikes) continue;
+
+        for (const recipeId of similarUserLikes) {
+          if (
+            targetUserLikes.has(recipeId) ||
+            excludeRecipeIds.includes(recipeId)
+          ) {
+            continue; // Skip recipes already liked or excluded
+          }
+
+          if (!candidateRecipes.has(recipeId)) {
+            candidateRecipes.set(recipeId, { score: 0, reason: [] });
+          }
+
+          const candidate = candidateRecipes.get(recipeId)!;
+          candidate.score += similarUser.similarity; // Weight by user similarity
+          candidate.reason.push(`${similarUser.commonLikes} common likes`);
+        }
+      }
+
+      // Get recipe details and sort by score
+      const recipeIds = Array.from(candidateRecipes.keys()).slice(0, limit * 2);
+
+      if (recipeIds.length === 0) {
+        this.logger.warn('No candidate recipes found from similar users');
+        return this.getFallbackRecommendations(limit, excludeRecipeIds);
+      }
+
+      const recipes = await this.recipeRepository.find({
+        where: { id: In(recipeIds) },
       });
-      
-      return popularRecipes.map((recipe, index) => ({
-        recipe,
-        score: 0.8 - (index * 0.1), // Simple scoring based on position
-        type: 'collaborative' as const,
-        reason: 'Popular among users with similar tastes',
-      }));
+
+      const minScore = filters.minScore ?? this.MIN_COLLABORATIVE_SCORE;
+
+      const recommendations = recipes
+        .map((recipe) => {
+          const candidate = candidateRecipes.get(recipe.id)!;
+          return {
+            recipe,
+            score: candidate.score / similarUsers.length, // Normalize score
+            type: 'collaborative' as const,
+            reason: `Liked by ${candidate.reason.length} similar users`,
+          };
+        })
+        .filter(({ score, recipe }) => {
+          const meetsThreshold = score >= minScore;
+          if (!meetsThreshold) {
+            this.logger.log(
+              `[Collaborative Filter] ${recipe.title}: ${score.toFixed(3)} < ${minScore} ❌`,
+            );
+          } else {
+            this.logger.log(
+              `[Collaborative Filter] ${recipe.title}: ${score.toFixed(3)} >= ${minScore} ✅`,
+            );
+          }
+          return meetsThreshold;
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      this.logger.log(
+        `Generated ${recommendations.length} collaborative recommendations (min score: ${minScore})`,
+      );
+      return recommendations;
     } catch (error) {
       this.logger.error('Error in collaborative recommendations', error.stack);
+      return this.getFallbackRecommendations(limit, excludeRecipeIds, filters);
+    }
+  }
+
+  private async getFallbackRecommendations(
+    limit: number,
+    excludeRecipeIds: string[] = [],
+    filters: CollaborativeFilters = {},
+  ): Promise<RecommendationItemDto[]> {
+    // Fallback to popular recipes when collaborative filtering fails
+    const minScore = filters.minScore ?? this.MIN_COLLABORATIVE_SCORE;
+
+    // With high threshold (0.6), fallback should return empty results
+    // This forces the system to rely on true collaborative filtering or other methods
+    if (minScore >= 0.6) {
+      this.logger.warn(
+        `High collaborative threshold (${minScore}) - no fallback recommendations provided. Users need more interaction data for collaborative filtering.`,
+      );
       return [];
     }
+
+    const popularRecipes = await this.recipeRepository.find({
+      where: { id: Not(In(excludeRecipeIds)) },
+      order: { averageRating: 'DESC', reviewCount: 'DESC' },
+      take: limit,
+    });
+
+    const fallbackRecommendations = popularRecipes.map((recipe, index) => ({
+      recipe,
+      score: Math.max(0.4 - index * 0.05, 0.1), // Realistic fallback scores, don't inflate
+      type: 'collaborative' as const,
+      reason:
+        'Popular recipe (insufficient user data for collaborative filtering)',
+    }));
+
+    this.logger.log(
+      `Generated ${fallbackRecommendations.length} fallback recommendations (scores too low for threshold ${minScore})`,
+    );
+
+    return fallbackRecommendations;
   }
 
   private async getHybridRecommendations(
@@ -221,20 +442,23 @@ export class RecommendationService {
     try {
       // Simple hybrid approach: combine and re-rank
       const combined = [...contentRecs, ...collabRecs];
-      
+
       // Group by recipe ID and combine scores
       const recipeMap = new Map<string, RecommendationItemDto>();
-      
-      combined.forEach(rec => {
+
+      combined.forEach((rec) => {
         const existing = recipeMap.get(rec.recipe.id);
         if (existing) {
-          // Average the scores if the recipe appears in both lists
-          existing.score = (existing.score + rec.score) / 2;
+          // Weighted average: content-based gets 40%, collaborative gets 60%
+          const contentWeight = rec.type === 'content' ? 0.4 : 0.6;
+          existing.score = existing.score + rec.score * contentWeight;
+          existing.type = 'hybrid';
+          existing.reason = `Hybrid: ${existing.reason} + ${rec.reason}`;
         } else {
           recipeMap.set(rec.recipe.id, { ...rec });
         }
       });
-      
+
       return Array.from(recipeMap.values())
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
@@ -256,26 +480,32 @@ export class RecommendationService {
     if (!filters || Object.keys(filters).length === 0) {
       return recipes;
     }
-    
-    return recipes.filter(item => {
+
+    return recipes.filter((item) => {
       const recipe = item.recipe;
-      
-      if (filters.maxCalories !== undefined && recipe.calories > filters.maxCalories) {
+
+      if (
+        filters.maxCalories !== undefined &&
+        recipe.calories > filters.maxCalories
+      ) {
         return false;
       }
-      
-      if (filters.minProtein !== undefined && recipe.protein < filters.minProtein) {
+
+      if (
+        filters.minProtein !== undefined &&
+        recipe.protein < filters.minProtein
+      ) {
         return false;
       }
-      
+
       if (filters.maxCarbs !== undefined && recipe.carbs > filters.maxCarbs) {
         return false;
       }
-      
+
       if (filters.maxFat !== undefined && recipe.fat > filters.maxFat) {
         return false;
       }
-      
+
       return true;
     });
   }
@@ -286,70 +516,98 @@ export class RecommendationService {
   ): Promise<RecommendationResponseDto> {
     try {
       const startTime = Date.now();
-      const { 
-        ingredientIds = [], 
-        limit = 10, 
+      const {
+        ingredientIds = [],
+        limit = 10,
         includeContentBased = true,
         includeCollaborative = true,
         includeHybrid = true,
         ...filters
       } = request;
-      
+
       // Get user's liked/saved recipes to exclude from recommendations
       const user = await this.userRepository.findOne({
         where: { id: userId },
         relations: ['likedRecipes'],
       });
-      
-      const excludeRecipeIds = user?.likedRecipes?.map(r => r.id) || [];
-      
+
+      const excludeRecipeIds = user?.likedRecipes?.map((r) => r.id) || [];
+
       // Get recommendations from different strategies
       const [contentRecs, collabRecs] = await Promise.all([
         includeContentBased && ingredientIds?.length > 0
-          ? this.getContentBasedRecommendations(ingredientIds, limit * 2, excludeRecipeIds)
+          ? this.getContentBasedRecommendations(
+              ingredientIds,
+              limit * 2,
+              excludeRecipeIds,
+            )
           : [],
         includeCollaborative
-          ? this.getCollaborativeRecommendations(userId, limit * 2, excludeRecipeIds)
+          ? this.getCollaborativeRecommendations(
+              userId,
+              limit * 2,
+              excludeRecipeIds,
+              { minScore: filters.minCosineSimilarity }, // Use same threshold as vector recommendations
+            )
           : [],
       ]);
-      
+
       // Get hybrid recommendations if enabled
-      const hybridRecs = includeHybrid && (contentRecs.length > 0 || collabRecs.length > 0)
-        ? await this.getHybridRecommendations(contentRecs, collabRecs, limit * 2)
-        : [];
-      
+      const hybridRecs =
+        includeHybrid && (contentRecs.length > 0 || collabRecs.length > 0)
+          ? await this.getHybridRecommendations(
+              contentRecs,
+              collabRecs,
+              limit * 2,
+            )
+          : [];
+
       // Combine all recommendations
       let allRecommendations: RecommendationItemDto[] = [];
-      
+
       if (includeHybrid && hybridRecs.length > 0) {
         allRecommendations = [...hybridRecs];
       } else {
         if (includeContentBased) allRecommendations.push(...contentRecs);
         if (includeCollaborative) allRecommendations.push(...collabRecs);
       }
-      
+
       // Filter by nutrition if requested
       if (Object.keys(filters).length > 0) {
-        allRecommendations = await this.filterByNutrition(allRecommendations, filters);
+        allRecommendations = await this.filterByNutrition(
+          allRecommendations,
+          filters,
+        );
       }
-      
+
       // Remove duplicates and sort by score
       const uniqueRecipes = new Map<string, RecommendationItemDto>();
-      allRecommendations.forEach(rec => {
+      allRecommendations.forEach((rec) => {
         if (!uniqueRecipes.has(rec.recipe.id)) {
           uniqueRecipes.set(rec.recipe.id, rec);
         }
       });
-      
+
       const sortedRecommendations = Array.from(uniqueRecipes.values())
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
-      
+
       // Count recommendations by type
-      const contentCount = sortedRecommendations.filter(r => r.type === 'content').length;
-      const collabCount = sortedRecommendations.filter(r => r.type === 'collaborative').length;
-      const hybridCount = sortedRecommendations.filter(r => r.type === 'hybrid').length;
-      
+      const contentCount = sortedRecommendations.filter(
+        (r) => r.type === 'content',
+      ).length;
+      const collabCount = sortedRecommendations.filter(
+        (r) => r.type === 'collaborative',
+      ).length;
+      const hybridCount = sortedRecommendations.filter(
+        (r) => r.type === 'hybrid',
+      ).length;
+
+      const processingTime = Date.now() - startTime;
+      this.logger.log(
+        `Generated ${sortedRecommendations.length} recommendations in ${processingTime}ms`,
+      );
+
       return {
         recommendations: sortedRecommendations,
         metadata: {
@@ -370,7 +628,6 @@ export class RecommendationService {
           collaborativeCount: 0,
           hybridCount: 0,
           timestamp: new Date(),
-          // error: 'Failed to generate recommendations',
         },
       };
     }

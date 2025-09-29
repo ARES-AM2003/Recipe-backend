@@ -14,12 +14,14 @@ interface RecommendationFilters {
   maxPrepTime?: number;
   minRating?: number;
   tags?: string[];
+  minCosineSimilarity?: number;
 }
 
 @Injectable()
 export class RecommendationVecService implements OnModuleInit {
   private embeddings: Record<string, number[]> = {};
   private embeddingsLoaded = false;
+  private readonly MIN_COSINE_SIMILARITY = 0.6;
 
   constructor(
     @InjectRepository(User) private usersRepo: Repository<User>,
@@ -125,29 +127,52 @@ export class RecommendationVecService implements OnModuleInit {
       );
     }
 
-    // Score recipes
-    const scoredRecipes = safeRecipes.map((recipe) => {
-      const recipeVectors = recipe.ingredients
-        .map((i) => this.getVector(i.name))
-        .filter((v): v is number[] => v !== null);
+    // Score recipes and filter by minimum cosine similarity
+    const minSimilarity =
+      filters.minCosineSimilarity ?? this.MIN_COSINE_SIMILARITY;
 
-      if (!recipeVectors.length || !pantryVectors.length)
-        return { recipe, score: 0 };
+    const scoredRecipes = safeRecipes
+      .map((recipe) => {
+        const recipeVectors = recipe.ingredients
+          .map((i) => this.getVector(i.name))
+          .filter((v): v is number[] => v !== null);
 
-      const score =
-        recipeVectors.reduce((sum, rVec) => {
-          const maxSim = pantryVectors.reduce(
-            (max, pVec) => Math.max(max, this.cosineSimilarity(pVec, rVec)),
-            0,
+        if (!recipeVectors.length || !pantryVectors.length)
+          return { recipe, score: 0 };
+
+        const score =
+          recipeVectors.reduce((sum, rVec) => {
+            const maxSim = pantryVectors.reduce(
+              (max, pVec) => Math.max(max, this.cosineSimilarity(pVec, rVec)),
+              0,
+            );
+            return sum + maxSim;
+          }, 0) / recipeVectors.length;
+
+        return { recipe, score };
+      })
+      .filter(({ score, recipe }) => {
+        // Filter out recipes with cosine similarity below threshold
+        const meetsThreshold = score >= minSimilarity;
+        if (!meetsThreshold) {
+          console.log(
+            `[Similarity Filter] ${recipe.title}: ${score.toFixed(3)} < ${minSimilarity} ❌`,
           );
-          return sum + maxSim;
-        }, 0) / recipeVectors.length;
+        } else {
+          console.log(
+            `[Similarity Filter] ${recipe.title}: ${score.toFixed(3)} >= ${minSimilarity} ✅`,
+          );
+        }
+        return meetsThreshold;
+      });
 
-      return { recipe, score };
-    });
+    console.log(
+      `📊 Recipes with similarity >= ${minSimilarity}:`,
+      scoredRecipes.length,
+    );
     console.log(scoredRecipes);
 
-    // Apply filters and log
+    // Apply other filters and log
     const filteredRecipes = scoredRecipes
       .filter(({ recipe }) => {
         let passed = true;
