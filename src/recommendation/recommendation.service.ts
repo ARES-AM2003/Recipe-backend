@@ -12,10 +12,13 @@ import {
 import * as natural from 'natural';
 import * as tf from '@tensorflow/tfjs-node';
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs';
+import * as path from 'path';
 
 type RecipeVector = {
   recipe: Recipe;
   vector: number[];
+  ingredientVector: number[];
 };
 
 interface UserSimilarity {
@@ -32,6 +35,10 @@ interface CollaborativeFilters {
   minScore?: number;
 }
 
+interface IngredientEmbeddings {
+  [ingredientName: string]: number[];
+}
+
 @Injectable()
 export class RecommendationService {
   private readonly logger = new Logger(RecommendationService.name);
@@ -41,7 +48,9 @@ export class RecommendationService {
   private userLikeMatrix: UserLikeMatrix = {};
   private lastMatrixUpdate: Date = new Date(0);
   private readonly MATRIX_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-  private readonly MIN_COLLABORATIVE_SCORE = 0.6; // Default minimum score for collaborative recommendations
+  private readonly MIN_COLLABORATIVE_SCORE = 0.6;
+  private ingredientEmbeddings: IngredientEmbeddings = {};
+  private embeddingsLoaded = false;
 
   constructor(
     @InjectRepository(Recipe)
@@ -59,6 +68,9 @@ export class RecommendationService {
     try {
       // Initialize TF-IDF for content-based filtering
       this.tfidf = new natural.TfIdf();
+
+      // Load ingredient embeddings
+      await this.loadIngredientEmbeddings();
 
       // Use pagination to avoid memory issues
       const batchSize = 100;
@@ -86,9 +98,12 @@ export class RecommendationService {
         this.logger.debug(`Processed ${offset} recipes...`);
       }
 
-      // Load or initialize collaborative filtering model
+      // Load collaborative filtering model
       await this.loadCollaborativeModel();
       await this.updateUserLikeMatrix();
+
+      // Calculate vectors for all recipes
+      await this.calculateRecipeVectors();
 
       this.logger.log(
         `Recommendation engine initialized with ${this.recipeVectors.length} recipes`,
@@ -99,6 +114,41 @@ export class RecommendationService {
         error.stack,
       );
     }
+  }
+
+  private async loadIngredientEmbeddings() {
+    try {
+      const embeddingPath = path.resolve(
+        __dirname,
+        '../../ingredients/ingredents-embeddings/ingredient_embeddings.json',
+      );
+
+      if (fs.existsSync(embeddingPath)) {
+        this.ingredientEmbeddings = JSON.parse(
+          fs.readFileSync(embeddingPath, 'utf-8'),
+        );
+        this.embeddingsLoaded = true;
+        this.logger.log(
+          `✅ Loaded embeddings for ${Object.keys(this.ingredientEmbeddings).length} ingredients`,
+        );
+      } else {
+        this.logger.warn(
+          '⚠️ Ingredient embeddings not found, using fallback similarity',
+        );
+      }
+    } catch (error) {
+      this.logger.error('Error loading ingredient embeddings', error.stack);
+    }
+  }
+
+  private normalizeIngredientName(name: string): string {
+    return name.toLowerCase().replace(/\s+/g, '_');
+  }
+
+  private getIngredientVector(ingredientName: string): number[] | null {
+    if (!this.embeddingsLoaded) return null;
+    const key = this.normalizeIngredientName(ingredientName);
+    return this.ingredientEmbeddings[key] || null;
   }
 
   private async processBatch(recipes: Recipe[]) {
@@ -118,35 +168,74 @@ export class RecommendationService {
 
       this.tfidf.addDocument(text);
 
-      // Store recipe with its vector (will be calculated later)
+      // Store recipe with vectors (will be calculated later)
       this.recipeVectors.push({
         recipe,
-        vector: [], // Will be populated after all documents are added
+        vector: [], // TF-IDF vector
+        ingredientVector: [], // Ingredient embedding vector
       });
     } catch (error) {
       this.logger.error(`Error processing recipe ${recipe.id}`, error.stack);
     }
   }
 
-  private getTfidfVector(text: string): number[] {
-    if (!text || typeof text !== 'string') {
-      return [];
+  private async calculateRecipeVectors() {
+    this.logger.log('Calculating vectors for all recipes...');
+
+    if (!this.tfidf || this.tfidf.documents.length === 0) {
+      this.logger.error('❌ TF-IDF model not properly initialized');
+      return;
     }
 
-    const documentCount = this.tfidf.documents.length;
-    const vector: number[] = Array(documentCount).fill(0);
+    // Get all unique terms for consistent vocabulary
+    const allTerms = new Set<string>();
+    for (let i = 0; i < this.tfidf.documents.length; i++) {
+      this.tfidf.listTerms(i).forEach((item) => allTerms.add(item.term));
+    }
+    const vocabulary = Array.from(allTerms).sort();
 
-    this.tfidf.tfidfs(text, (i, measure) => {
-      if (i >= 0 && i < vector.length) {
-        vector[i] = measure;
+    for (let i = 0; i < this.recipeVectors.length; i++) {
+      const recipeVector = this.recipeVectors[i];
+
+      // Calculate TF-IDF vector
+      const tfidfVector: number[] = new Array(vocabulary.length).fill(0);
+      vocabulary.forEach((term, index) => {
+        tfidfVector[index] = this.tfidf.tfidf(term, i);
+      });
+      recipeVector.vector = tfidfVector;
+
+      // Calculate ingredient embedding vector (average of all ingredient embeddings)
+      const ingredientVectors = recipeVector.recipe.ingredients
+        .map((ing) => this.getIngredientVector(ing.name))
+        .filter((vec): vec is number[] => vec !== null);
+
+      if (ingredientVectors.length > 0) {
+        const avgVector = new Array(ingredientVectors[0].length).fill(0);
+        ingredientVectors.forEach((vec) => {
+          vec.forEach((val, idx) => {
+            avgVector[idx] += val;
+          });
+        });
+        // Average the vectors
+        recipeVector.ingredientVector = avgVector.map(
+          (val) => val / ingredientVectors.length,
+        );
       }
-    });
 
-    return vector;
+      if (i % 100 === 0) {
+        this.logger.debug(
+          `Calculated vectors for ${i + 1}/${this.recipeVectors.length} recipes`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `✅ Calculated vectors for ${this.recipeVectors.length} recipes`,
+    );
   }
 
   private cosineSimilarity(vecA: number[], vecB: number[]): number {
-    if (vecA.length !== vecB.length) return 0;
+    if (vecA.length !== vecB.length || vecA.length === 0) return 0;
 
     const dotProduct = vecA.reduce(
       (sum, val, i) => sum + val * (vecB[i] || 0),
@@ -157,6 +246,145 @@ export class RecommendationService {
 
     if (magnitudeA === 0 || magnitudeB === 0) return 0;
     return dotProduct / (magnitudeA * magnitudeB);
+  }
+
+  private calculateIngredientSimilarity(
+    queryIngredients: string[],
+    recipeIngredients: string[],
+  ): number {
+    if (queryIngredients.length === 0 || recipeIngredients.length === 0) {
+      return 0;
+    }
+
+    // Normalize ingredient names for comparison
+    const normalizeIngredient = (name: string) =>
+      name
+        .toLowerCase()
+        .trim()
+        .replace(/[^\w\s]/g, '');
+
+    const normalizedQuery = queryIngredients.map(normalizeIngredient);
+    const normalizedRecipe = recipeIngredients.map(normalizeIngredient);
+
+    let exactMatches = 0;
+    let partialMatches = 0;
+
+    for (const queryIng of normalizedQuery) {
+      // Check for exact match
+      if (normalizedRecipe.includes(queryIng)) {
+        exactMatches++;
+      } else {
+        // Check for partial match (contains)
+        const partialMatch = normalizedRecipe.some(
+          (recipeIng) =>
+            recipeIng.includes(queryIng) || queryIng.includes(recipeIng),
+        );
+        if (partialMatch) {
+          partialMatches++;
+        }
+      }
+    }
+
+    // Calculate Jaccard similarity with weighted matches
+    const totalMatches = exactMatches + partialMatches * 0.5;
+    const totalPossible = queryIngredients.length;
+
+    return totalMatches / totalPossible;
+  }
+
+  private calculateEmbeddingSimilarity(
+    queryIngredients: string[],
+    recipeIngredients: string[],
+  ): number {
+    if (
+      !this.embeddingsLoaded ||
+      queryIngredients.length === 0 ||
+      recipeIngredients.length === 0
+    ) {
+      return 0;
+    }
+
+    // Get embeddings for query ingredients
+    const queryVectors = queryIngredients
+      .map((ing) => this.getIngredientVector(ing))
+      .filter((vec): vec is number[] => vec !== null);
+
+    // Get embeddings for recipe ingredients
+    const recipeVectors = recipeIngredients
+      .map((ing) => this.getIngredientVector(ing))
+      .filter((vec): vec is number[] => vec !== null);
+
+    if (queryVectors.length === 0 || recipeVectors.length === 0) {
+      return 0;
+    }
+
+    // Calculate max similarity between any query ingredient and any recipe ingredient
+    let maxSimilarity = 0;
+    for (const qVec of queryVectors) {
+      for (const rVec of recipeVectors) {
+        const similarity = this.cosineSimilarity(qVec, rVec);
+        maxSimilarity = Math.max(maxSimilarity, similarity);
+      }
+    }
+
+    return maxSimilarity;
+  }
+
+  private calculateCuisineCompatibility(
+    queryIngredients: string[],
+    recipe: Recipe,
+  ): number {
+    // Simple cuisine compatibility based on ingredient-cuisine associations
+    const cuisineIngredients = {
+      Italian: ['tomato', 'basil', 'mozzarella', 'parmesan', 'olive', 'garlic'],
+      Mexican: ['chili', 'cumin', 'lime', 'cilantro', 'jalapeño', 'avocado'],
+      Indian: ['turmeric', 'cumin', 'coriander', 'garam masala', 'cardamom'],
+      Asian: ['soy sauce', 'ginger', 'sesame', 'rice', 'noodles'],
+    };
+
+    const recipeCuisineIngredients = cuisineIngredients[recipe.cuisine] || [];
+    const matches = queryIngredients.filter((ing) =>
+      recipeCuisineIngredients.some((cui) =>
+        ing.toLowerCase().includes(cui.toLowerCase()),
+      ),
+    );
+
+    return matches.length / Math.max(queryIngredients.length, 1);
+  }
+
+  private calculateIngredientRarityBonus(recipeIngredients: string[]): number {
+    // Common ingredients that appear in many recipes
+    const commonIngredients = [
+      'salt',
+      'pepper',
+      'oil',
+      'water',
+      'flour',
+      'sugar',
+      'butter',
+      'onion',
+      'garlic',
+      'tomato',
+      'egg',
+      'milk',
+      'cheese',
+    ];
+
+    const totalIngredients = recipeIngredients.length;
+    if (totalIngredients === 0) return 0;
+
+    const rareIngredients = recipeIngredients.filter(
+      (ing) =>
+        !commonIngredients.some((common) =>
+          ing.toLowerCase().includes(common.toLowerCase()),
+        ),
+    );
+
+    // Calculate rarity ratio: more rare ingredients = higher bonus
+    const rarityRatio = rareIngredients.length / totalIngredients;
+
+    // Scale to 0-1 range, giving higher bonus for more unique recipes
+    return Math.min(rarityRatio * 1.5, 1.0);
   }
 
   private jaccardSimilarity(setA: Set<string>, setB: Set<string>): number {
@@ -227,7 +455,6 @@ export class RecommendationService {
       ).size;
 
       if (similarity > 0 && commonLikes >= 2) {
-        // Require at least 2 common likes
         similarities.push({
           userId: otherUserId,
           similarity,
@@ -244,9 +471,6 @@ export class RecommendationService {
   private async loadCollaborativeModel() {
     try {
       this.logger.log('Initializing collaborative filtering model...');
-
-      // For now, we use user-based collaborative filtering
-      // In production, you could load a pre-trained matrix factorization model here
       this.model = null;
     } catch (error) {
       this.logger.error('Error loading collaborative model', error.stack);
@@ -258,37 +482,127 @@ export class RecommendationService {
     ingredientIds: string[],
     limit: number,
     excludeRecipeIds: string[] = [],
+    minScore: number = 0.6,
   ): Promise<RecommendationItemDto[]> {
     try {
+      this.logger.log(
+        `🔍 Content-based recommendation started (threshold: ${minScore})`,
+      );
+      this.logger.log(`📋 Input ingredient IDs: ${ingredientIds.join(', ')}`);
+
       // Get ingredients for the query
       const ingredients = await this.ingredientRepository.find({
         where: { id: In(ingredientIds) },
       });
 
+      this.logger.log(
+        `✅ Found ${ingredients.length}/${ingredientIds.length} ingredients in database`,
+      );
+
       if (ingredients.length === 0) {
+        this.logger.warn(
+          `❌ No valid ingredients found for IDs: ${ingredientIds.join(', ')}`,
+        );
         return [];
       }
 
-      // Create a query string from ingredients
-      const queryText = ingredients.map((i) => i.name).join(' ');
-      const queryVector = this.getTfidfVector(queryText);
+      const queryIngredientNames = ingredients.map((i) => i.name);
+      this.logger.log(
+        `🥬 Query ingredients: ${queryIngredientNames.join(', ')}`,
+      );
 
-      // Calculate similarity scores
-      const scoredRecipes = this.recipeVectors
-        .filter((rv) => !excludeRecipeIds.includes(rv.recipe.id))
-        .map((rv) => ({
-          recipe: rv.recipe,
-          score: this.cosineSimilarity(queryVector, rv.vector),
-        }))
-        .filter((item) => item.score > 0) // Filter out zero-similarity recipes
+      const availableRecipes = this.recipeVectors.filter(
+        (rv) => !excludeRecipeIds.includes(rv.recipe.id),
+      );
+
+      this.logger.log(
+        `🍳 Available recipes after exclusion: ${availableRecipes.length}`,
+      );
+
+      const scoredRecipes = availableRecipes
+        .map((rv) => {
+          const recipeIngredientNames = rv.recipe.ingredients.map(
+            (i) => i.name,
+          );
+
+          // 1. Exact ingredient matching (40% weight)
+          const exactScore = this.calculateIngredientSimilarity(
+            queryIngredientNames,
+            recipeIngredientNames,
+          );
+
+          // 2. Semantic similarity using embeddings (30% weight)
+          const embeddingScore = this.calculateEmbeddingSimilarity(
+            queryIngredientNames,
+            recipeIngredientNames,
+          );
+
+          // 3. Recipe quality factors (20% weight)
+          const qualityScore = Math.min(
+            (rv.recipe.averageRating / 5.0) * 0.7 +
+              (Math.min(rv.recipe.reviewCount, 100) / 100) * 0.3,
+            1.0,
+          );
+
+          // 4. Ingredient rarity bonus (10% weight)
+          const rarityBonus = this.calculateIngredientRarityBonus(
+            recipeIngredientNames,
+          );
+
+          // Combine all factors
+          const finalScore =
+            exactScore * 0.4 +
+            embeddingScore * 0.3 +
+            qualityScore * 0.2 +
+            rarityBonus * 0.1;
+
+          if (finalScore > 0.01) {
+            this.logger.log(`📈 ${rv.recipe.title}:`);
+            this.logger.log(
+              `   - Exact: ${exactScore.toFixed(3)} | Embedding: ${embeddingScore.toFixed(3)} | Quality: ${qualityScore.toFixed(3)} | Rarity: ${rarityBonus.toFixed(3)}`,
+            );
+            this.logger.log(`   - Final: ${finalScore.toFixed(3)}`);
+            this.logger.log(
+              `   - Recipe ingredients: ${recipeIngredientNames.join(', ')}`,
+            );
+          }
+
+          return {
+            recipe: rv.recipe,
+            score: finalScore,
+          };
+        })
+        .filter((item) => {
+          const meetsThreshold = item.score >= minScore;
+          if (!meetsThreshold) {
+            this.logger.log(
+              `[Content Filter] ${item.recipe.title}: ${item.score.toFixed(3)} < ${minScore} ❌`,
+            );
+          } else {
+            this.logger.log(
+              `[Content Filter] ${item.recipe.title}: ${item.score.toFixed(3)} >= ${minScore} ✅`,
+            );
+          }
+          return meetsThreshold;
+        })
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
+
+      this.logger.log(
+        `🎯 Final content recommendations with threshold >= ${minScore}: ${scoredRecipes.length}`,
+      );
+
+      if (scoredRecipes.length > 0) {
+        this.logger.log(
+          `🏆 Top recommendation: ${scoredRecipes[0].recipe.title} (${scoredRecipes[0].score.toFixed(3)})`,
+        );
+      }
 
       return scoredRecipes.map((item) => ({
         recipe: item.recipe,
         score: item.score,
         type: 'content' as const,
-        reason: `Similar to ingredients: ${ingredients.map((i) => i.name).join(', ')}`,
+        reason: `Similar to ingredients: ${queryIngredientNames.join(', ')}`,
       }));
     } catch (error) {
       this.logger.error('Error in content-based recommendations', error.stack);
@@ -303,21 +617,23 @@ export class RecommendationService {
     filters: CollaborativeFilters = {},
   ): Promise<RecommendationItemDto[]> {
     try {
-      // Find users with similar preferences
       const similarUsers = await this.findSimilarUsers(userId, 20);
 
       if (similarUsers.length === 0) {
         this.logger.warn(
           `No similar users found for user ${userId}, falling back to popular recipes`,
         );
-        return this.getFallbackRecommendations(limit, excludeRecipeIds);
+        return this.getFallbackRecommendations(
+          limit,
+          excludeRecipeIds,
+          filters,
+        );
       }
 
       this.logger.log(
         `Found ${similarUsers.length} similar users for collaborative filtering`,
       );
 
-      // Get recipes liked by similar users but not by current user
       const targetUserLikes = this.userLikeMatrix[userId] || new Set();
       const candidateRecipes = new Map<
         string,
@@ -333,7 +649,7 @@ export class RecommendationService {
             targetUserLikes.has(recipeId) ||
             excludeRecipeIds.includes(recipeId)
           ) {
-            continue; // Skip recipes already liked or excluded
+            continue;
           }
 
           if (!candidateRecipes.has(recipeId)) {
@@ -341,17 +657,20 @@ export class RecommendationService {
           }
 
           const candidate = candidateRecipes.get(recipeId)!;
-          candidate.score += similarUser.similarity; // Weight by user similarity
+          candidate.score += similarUser.similarity;
           candidate.reason.push(`${similarUser.commonLikes} common likes`);
         }
       }
 
-      // Get recipe details and sort by score
       const recipeIds = Array.from(candidateRecipes.keys()).slice(0, limit * 2);
 
       if (recipeIds.length === 0) {
         this.logger.warn('No candidate recipes found from similar users');
-        return this.getFallbackRecommendations(limit, excludeRecipeIds);
+        return this.getFallbackRecommendations(
+          limit,
+          excludeRecipeIds,
+          filters,
+        );
       }
 
       const recipes = await this.recipeRepository.find({
@@ -365,7 +684,7 @@ export class RecommendationService {
           const candidate = candidateRecipes.get(recipe.id)!;
           return {
             recipe,
-            score: candidate.score / similarUsers.length, // Normalize score
+            score: candidate.score / similarUsers.length,
             type: 'collaborative' as const,
             reason: `Liked by ${candidate.reason.length} similar users`,
           };
@@ -401,14 +720,11 @@ export class RecommendationService {
     excludeRecipeIds: string[] = [],
     filters: CollaborativeFilters = {},
   ): Promise<RecommendationItemDto[]> {
-    // Fallback to popular recipes when collaborative filtering fails
     const minScore = filters.minScore ?? this.MIN_COLLABORATIVE_SCORE;
 
-    // With high threshold (0.6), fallback should return empty results
-    // This forces the system to rely on true collaborative filtering or other methods
     if (minScore >= 0.6) {
       this.logger.warn(
-        `High collaborative threshold (${minScore}) - no fallback recommendations provided. Users need more interaction data for collaborative filtering.`,
+        `High collaborative threshold (${minScore}) - no fallback recommendations provided.`,
       );
       return [];
     }
@@ -421,14 +737,14 @@ export class RecommendationService {
 
     const fallbackRecommendations = popularRecipes.map((recipe, index) => ({
       recipe,
-      score: Math.max(0.4 - index * 0.05, 0.1), // Realistic fallback scores, don't inflate
+      score: Math.max(0.4 - index * 0.05, 0.1),
       type: 'collaborative' as const,
       reason:
         'Popular recipe (insufficient user data for collaborative filtering)',
     }));
 
     this.logger.log(
-      `Generated ${fallbackRecommendations.length} fallback recommendations (scores too low for threshold ${minScore})`,
+      `Generated ${fallbackRecommendations.length} fallback recommendations`,
     );
 
     return fallbackRecommendations;
@@ -438,20 +754,32 @@ export class RecommendationService {
     contentRecs: RecommendationItemDto[],
     collabRecs: RecommendationItemDto[],
     limit: number,
+    minScore: number = 0.6,
   ): Promise<RecommendationItemDto[]> {
     try {
-      // Simple hybrid approach: combine and re-rank
-      const combined = [...contentRecs, ...collabRecs];
+      this.logger.log(`🔀 Starting hybrid recommendation generation`);
+      this.logger.log(
+        `📊 Input: ${contentRecs.length} content + ${collabRecs.length} collaborative`,
+      );
 
-      // Group by recipe ID and combine scores
+      if (contentRecs.length === 0 && collabRecs.length === 0) {
+        this.logger.warn(`⚠️ No input recommendations for hybrid filtering`);
+        return [];
+      }
+
+      const combined = [...contentRecs, ...collabRecs];
       const recipeMap = new Map<string, RecommendationItemDto>();
 
       combined.forEach((rec) => {
         const existing = recipeMap.get(rec.recipe.id);
         if (existing) {
-          // Weighted average: content-based gets 40%, collaborative gets 60%
-          const contentWeight = rec.type === 'content' ? 0.4 : 0.6;
-          existing.score = existing.score + rec.score * contentWeight;
+          // Weighted combination: content-based gets 60%, collaborative gets 40%
+          const newScore =
+            rec.type === 'content'
+              ? existing.score * 0.4 + rec.score * 0.6
+              : existing.score * 0.6 + rec.score * 0.4;
+
+          existing.score = newScore;
           existing.type = 'hybrid';
           existing.reason = `Hybrid: ${existing.reason} + ${rec.reason}`;
         } else {
@@ -459,9 +787,28 @@ export class RecommendationService {
         }
       });
 
-      return Array.from(recipeMap.values())
+      const hybridRecommendations = Array.from(recipeMap.values())
+        .filter(({ score, recipe }) => {
+          const meetsThreshold = score >= minScore;
+          if (!meetsThreshold) {
+            this.logger.log(
+              `[Hybrid Filter] ${recipe.title}: ${score.toFixed(3)} < ${minScore} ❌`,
+            );
+          } else {
+            this.logger.log(
+              `[Hybrid Filter] ${recipe.title}: ${score.toFixed(3)} >= ${minScore} ✅`,
+            );
+          }
+          return meetsThreshold;
+        })
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
+
+      this.logger.log(
+        `✅ Generated ${hybridRecommendations.length} hybrid recommendations (min score: ${minScore})`,
+      );
+
+      return hybridRecommendations;
     } catch (error) {
       this.logger.error('Error in hybrid recommendations', error.stack);
       return [];
@@ -525,7 +872,13 @@ export class RecommendationService {
         ...filters
       } = request;
 
-      // Get user's liked/saved recipes to exclude from recommendations
+      this.logger.log(
+        `🔍 Starting recommendation generation for user ${userId}`,
+      );
+      this.logger.log(
+        `📊 Request: content=${includeContentBased}, collaborative=${includeCollaborative}, hybrid=${includeHybrid}`,
+      );
+
       const user = await this.userRepository.findOne({
         where: { id: userId },
         relations: ['likedRecipes'],
@@ -540,6 +893,7 @@ export class RecommendationService {
               ingredientIds,
               limit * 2,
               excludeRecipeIds,
+              filters.minCosineSimilarity ?? 0.6,
             )
           : [],
         includeCollaborative
@@ -547,10 +901,13 @@ export class RecommendationService {
               userId,
               limit * 2,
               excludeRecipeIds,
-              { minScore: filters.minCosineSimilarity }, // Use same threshold as vector recommendations
+              { minScore: filters.minCosineSimilarity },
             )
           : [],
       ]);
+
+      this.logger.log(`📈 Content recommendations: ${contentRecs.length}`);
+      this.logger.log(`👥 Collaborative recommendations: ${collabRecs.length}`);
 
       // Get hybrid recommendations if enabled
       const hybridRecs =
@@ -559,17 +916,33 @@ export class RecommendationService {
               contentRecs,
               collabRecs,
               limit * 2,
+              filters.minCosineSimilarity ?? 0.6,
             )
           : [];
+
+      this.logger.log(`🔀 Hybrid recommendations: ${hybridRecs.length}`);
 
       // Combine all recommendations
       let allRecommendations: RecommendationItemDto[] = [];
 
       if (includeHybrid && hybridRecs.length > 0) {
+        this.logger.log(
+          `Using hybrid recommendations (${hybridRecs.length} recipes)`,
+        );
         allRecommendations = [...hybridRecs];
       } else {
-        if (includeContentBased) allRecommendations.push(...contentRecs);
-        if (includeCollaborative) allRecommendations.push(...collabRecs);
+        if (includeContentBased) {
+          this.logger.log(
+            `Adding ${contentRecs.length} content-based recommendations`,
+          );
+          allRecommendations.push(...contentRecs);
+        }
+        if (includeCollaborative) {
+          this.logger.log(
+            `Adding ${collabRecs.length} collaborative recommendations`,
+          );
+          allRecommendations.push(...collabRecs);
+        }
       }
 
       // Filter by nutrition if requested

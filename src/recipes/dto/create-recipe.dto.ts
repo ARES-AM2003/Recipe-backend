@@ -108,4 +108,8 @@ export class CreateRecipeDto {
   @IsNumber()
   @Min(0)
   sugar: number; // in grams
+
+  @IsNumber()
+  @Min(0)
+  sodium: number; // in grams
 }

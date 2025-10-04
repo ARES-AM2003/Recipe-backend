@@ -54,10 +54,13 @@ export class PantryItem {
   unit: QuantityUnit;
 
   @Column({ type: 'timestamp', nullable: true })
-  expiryDate: Date;
+  expiryDate: Date | null;
 
   @Column({ default: false })
   isFavorite: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  note: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -1,6 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Not } from 'typeorm';
+import { Repository, Not } from 'typeorm';
 import { PantryItem } from './entities/pantry-item.entity';
 import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
@@ -17,15 +21,18 @@ export class PantryService {
   ) {}
 
   async addItem(user: User, addPantryItemDto: AddPantryItemDto) {
-    const { ingredientId, ...pantryItemData } = addPantryItemDto;
-    
+    const { ingredientId, expiryDate, note, ...pantryItemData } =
+      addPantryItemDto;
+
     // Check if the ingredient exists
     const ingredient = await this.ingredientRepository.findOne({
       where: { id: ingredientId },
     });
 
     if (!ingredient) {
-      throw new NotFoundException(`Ingredient with ID "${ingredientId}" not found`);
+      throw new NotFoundException(
+        `Ingredient with ID "${ingredientId}" not found`,
+      );
     }
 
     // Check if the user already has this ingredient in their pantry
@@ -37,7 +44,9 @@ export class PantryService {
     });
 
     if (existingItem) {
-      throw new BadRequestException('This ingredient is already in your pantry');
+      throw new BadRequestException(
+        'This ingredient is already in your pantry',
+      );
     }
 
     const pantryItem = this.pantryItemRepository.create({
@@ -45,6 +54,15 @@ export class PantryService {
       user,
       ingredient,
     });
+
+    // Handle optional fields explicitly
+    if (note) {
+      pantryItem.note = note;
+    }
+
+    if (expiryDate) {
+      pantryItem.expiryDate = new Date(expiryDate);
+    }
 
     return this.pantryItemRepository.save(pantryItem);
   }
@@ -61,7 +79,7 @@ export class PantryService {
     },
   ) {
     const skip = (page - 1) * limit;
-    
+
     const query = this.pantryItemRepository
       .createQueryBuilder('pantryItem')
       .leftJoinAndSelect('pantryItem.ingredient', 'ingredient')
@@ -121,7 +139,7 @@ export class PantryService {
     updatePantryItemDto: UpdatePantryItemDto,
   ) {
     const pantryItem = await this.findOne(userId, id);
-    
+
     if (updatePantryItemDto.ingredientId) {
       const ingredient = await this.ingredientRepository.findOne({
         where: { id: updatePantryItemDto.ingredientId },
@@ -143,13 +161,36 @@ export class PantryService {
       });
 
       if (existingItem) {
-        throw new BadRequestException('This ingredient is already in your pantry');
+        throw new BadRequestException(
+          'This ingredient is already in your pantry',
+        );
       }
 
       pantryItem.ingredient = ingredient;
     }
 
-    Object.assign(pantryItem, updatePantryItemDto);
+    // Handle expiryDate conversion
+    if (updatePantryItemDto.expiryDate !== undefined) {
+      if (updatePantryItemDto.expiryDate) {
+        pantryItem.expiryDate = new Date(updatePantryItemDto.expiryDate);
+      } else {
+        pantryItem.expiryDate = null;
+      }
+    }
+
+    // Handle note field explicitly
+    if (updatePantryItemDto.note !== undefined) {
+      if (updatePantryItemDto.note) {
+        pantryItem.note = updatePantryItemDto.note;
+      } else {
+        pantryItem.note = null;
+      }
+    }
+
+    // Apply other updates (excluding already handled fields)
+    const { expiryDate, note, ...otherUpdates } = updatePantryItemDto;
+    Object.assign(pantryItem, otherUpdates);
+
     return this.pantryItemRepository.save(pantryItem);
   }
 
@@ -182,7 +223,7 @@ export class PantryService {
       if (item.ingredient) {
         categories.add(item.ingredient.category);
       }
-      
+
       if (item.expiryDate && new Date(item.expiryDate) <= soon) {
         expiringSoonCount++;
       }

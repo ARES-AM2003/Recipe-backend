@@ -8,6 +8,8 @@ import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { UsersModule } from '../users/users.module';
 import { IngredientsModule } from '../ingredients/ingredients.module';
+import { ExcelParserService } from './utils/excel-parser.service';
+import { LikesService } from './likes.service';
 
 @Module({
   imports: [
@@ -16,7 +18,12 @@ import { IngredientsModule } from '../ingredients/ingredients.module';
     IngredientsModule,
   ],
   controllers: [RecipesController],
-  providers: [RecipesService, RecipeFilterService],
+  providers: [
+    RecipesService,
+    RecipeFilterService,
+    ExcelParserService,
+    LikesService,
+  ],
   exports: [RecipesService],
 })
 export class RecipesModule {}

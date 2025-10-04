@@ -137,7 +137,6 @@ export class Recipe {
   updatedAt: Date;
 
   @ManyToMany(() => User, (user) => user.likedRecipes, { onDelete: 'CASCADE' })
-  @JoinTable()
   likedBy: User[];
 
   constructor(partial: Partial<Recipe>) {

@@ -88,16 +88,29 @@ export class RecommendationController {
   })
   async getContentBasedRecommendations(
     @Req() req: any,
-    @Query('ingredients') ingredientIds: string,
+    @Query('ingredientIds') ingredientIds: string,
     @Query('limit') limit = '10',
+    @Query('minCosineSimilarity') minCosineSimilarity?: string,
   ): Promise<RecommendationResponseDto> {
     if (!ingredientIds) {
       throw new BadRequestException('At least one ingredient ID is required');
     }
 
+    // Filter out empty strings from split
+    const ingredientIdArray = ingredientIds
+      .split(',')
+      .filter((id) => id.trim().length > 0);
+
+    if (ingredientIdArray.length === 0) {
+      throw new BadRequestException('Valid ingredient IDs are required');
+    }
+
     return this.recommendationService.getRecommendations(req.user.id, {
-      ingredientIds: ingredientIds.split(','),
+      ingredientIds: ingredientIdArray,
       limit: parseInt(limit, 10) || 10,
+      minCosineSimilarity: minCosineSimilarity
+        ? parseFloat(minCosineSimilarity)
+        : undefined,
       includeContentBased: true,
       includeCollaborative: false,
       includeHybrid: false,
@@ -137,12 +150,21 @@ export class RecommendationController {
   })
   async getHybridRecommendations(
     @Req() req: any,
-    @Query('ingredients') ingredientIds: string,
+    @Query('ingredientIds') ingredientIds: string,
     @Query('limit') limit = '10',
+    @Query('minCosineSimilarity') minCosineSimilarity?: string,
   ): Promise<RecommendationResponseDto> {
+    // Filter out empty strings from split and handle optional ingredients
+    const ingredientIdArray = ingredientIds
+      ? ingredientIds.split(',').filter((id) => id.trim().length > 0)
+      : [];
+
     return this.recommendationService.getRecommendations(req.user.id, {
-      ingredientIds: ingredientIds ? ingredientIds.split(',') : [],
+      ingredientIds: ingredientIdArray,
       limit: parseInt(limit, 10) || 10,
+      minCosineSimilarity: minCosineSimilarity
+        ? parseFloat(minCosineSimilarity)
+        : undefined,
       includeContentBased: true,
       includeCollaborative: true,
       includeHybrid: true,

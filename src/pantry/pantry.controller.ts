@@ -36,7 +36,11 @@ export class PantryController {
   @ApiBearerAuth('JWT')
   @Auth()
   @Post('items')
-  @ApiOperation({ summary: 'Add an item to the pantry' })
+  @ApiOperation({
+    summary: 'Add an item to the pantry',
+    description:
+      'Add a new ingredient to your pantry with optional note for tracking location, condition, or reminders',
+  })
   async addItem(@Req() req: any, @Body() addPantryItemDto: AddPantryItemDto) {
     const user = req.user as User;
     return await this.pantryService.addItem(user, addPantryItemDto);
@@ -123,7 +127,11 @@ export class PantryController {
   @Patch('items/:id')
   @ApiBearerAuth('JWT')
   @Auth()
-  @ApiOperation({ summary: 'Update a pantry item' })
+  @ApiOperation({
+    summary: 'Update a pantry item',
+    description:
+      'Update pantry item details including quantity, unit, expiry date, favorite status, and optional note',
+  })
   async update(
     @Req() req: any,
     @Param('id') id: string,
