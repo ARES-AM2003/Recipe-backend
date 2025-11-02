@@ -5,7 +5,7 @@ docker push ares2003/recipe:latest
 
 docker pull ares2003/recipe:latest
 docker stop recipie-backend && docker rm recipie-backend
-docker run -d   --name recipie-backend   --env-file .env   -p 22222:3000   --network recipe-net   ares2003/recipe:latest
+docker run -d   --name recipie-backend   --env-file /opt/.env   -p 22222:3001   --network recipe-net   ares2003/recipe:latest
 docker image prune -f
 
 
@@ -14,3 +14,8 @@ docker image prune -f
     "email": "john.doe@example.com",
     "password": "securePass123"
     }
+
+    {
+  "email": "admin@example.com",
+  "password": "AdminStrongPass123"
+}

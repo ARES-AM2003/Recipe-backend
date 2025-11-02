@@ -152,6 +152,7 @@ export class AuthService {
         recipes: user.recipes || [],
         pantryItems: user.pantryItems || [],
         likedRecipes: user.likedRecipes || [],
+        savedRecipes: user.savedRecipes || [],
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
         currentHashedRefreshToken: user.currentHashedRefreshToken,

@@ -343,10 +343,16 @@ export class RecipeFilterService {
         queryBuilder.orderBy('recipe.averageRating', 'ASC');
         break;
       case SortOption.TIME_ASC:
-        queryBuilder.orderBy('(recipe.prepTime + recipe.cookTime)', 'ASC');
+        // Sort by total time using multi-column ordering to avoid DISTINCT/alias issues
+        queryBuilder
+          .orderBy('recipe.prepTime', 'ASC')
+          .addOrderBy('recipe.cookTime', 'ASC');
         break;
       case SortOption.TIME_DESC:
-        queryBuilder.orderBy('(recipe.prepTime + recipe.cookTime)', 'DESC');
+        // Sort by total time using multi-column ordering to avoid DISTINCT/alias issues
+        queryBuilder
+          .orderBy('recipe.prepTime', 'DESC')
+          .addOrderBy('recipe.cookTime', 'DESC');
         break;
       case SortOption.MOST_REVIEWED:
         queryBuilder.orderBy('recipe.reviewCount', 'DESC');

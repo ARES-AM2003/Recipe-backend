@@ -14,6 +14,7 @@ import * as tf from '@tensorflow/tfjs-node';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as word2vec from 'word2vec';
 
 type RecipeVector = {
   recipe: Recipe;
@@ -51,6 +52,9 @@ export class RecommendationService {
   private readonly MIN_COLLABORATIVE_SCORE = 0.6;
   private ingredientEmbeddings: IngredientEmbeddings = {};
   private embeddingsLoaded = false;
+  private word2vecModel: any = null;
+  private word2vecLoaded = false;
+  private embeddingPath: string;
 
   constructor(
     @InjectRepository(Recipe)
@@ -61,7 +65,7 @@ export class RecommendationService {
     private readonly ingredientRepository: Repository<Ingredient>,
     private readonly configService: ConfigService,
   ) {
-    this.initializeRecommendationEngine();
+    void this.initializeRecommendationEngine();
   }
 
   private async initializeRecommendationEngine() {
@@ -69,8 +73,9 @@ export class RecommendationService {
       // Initialize TF-IDF for content-based filtering
       this.tfidf = new natural.TfIdf();
 
-      // Load ingredient embeddings
+      // Load ingredient embeddings and Word2Vec model
       await this.loadIngredientEmbeddings();
+      await this.loadWord2VecModel();
 
       // Use pagination to avoid memory issues
       const batchSize = 100;
@@ -118,14 +123,14 @@ export class RecommendationService {
 
   private async loadIngredientEmbeddings() {
     try {
-      const embeddingPath = path.resolve(
+      this.embeddingPath = path.resolve(
         __dirname,
         '../../ingredients/ingredents-embeddings/ingredient_embeddings.json',
       );
 
-      if (fs.existsSync(embeddingPath)) {
+      if (fs.existsSync(this.embeddingPath)) {
         this.ingredientEmbeddings = JSON.parse(
-          fs.readFileSync(embeddingPath, 'utf-8'),
+          fs.readFileSync(this.embeddingPath, 'utf-8'),
         );
         this.embeddingsLoaded = true;
         this.logger.log(
@@ -136,8 +141,52 @@ export class RecommendationService {
           '⚠️ Ingredient embeddings not found, using fallback similarity',
         );
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error loading ingredient embeddings', error.stack);
+    }
+  }
+
+  private async loadWord2VecModel() {
+    try {
+      const modelPath = path.resolve(
+        __dirname,
+        '../../ingredients/ingredents-embeddings/ingredient_w2v.model',
+      );
+
+      if (fs.existsSync(modelPath)) {
+        // Set a timeout for model loading to prevent hanging
+        const modelPromise = new Promise((resolve, reject) => {
+          word2vec.loadModel(modelPath, (error: any, model: any) => {
+            if (error) {
+              reject(new Error(error));
+            } else {
+              resolve(model);
+            }
+          });
+        });
+
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Model loading timeout')), 10000); // 10 second timeout
+        });
+
+        this.word2vecModel = await Promise.race([modelPromise, timeoutPromise]);
+        this.word2vecLoaded = true;
+        this.logger.log('✅ Loaded Word2Vec model successfully');
+      } else {
+        this.logger.warn(
+          '⚠️ Word2Vec model not found, embeddings limited to JSON only',
+        );
+      }
+    } catch (error: any) {
+      this.logger.error(
+        'Error loading Word2Vec model:',
+        error?.message || 'Unknown error',
+      );
+      this.logger.warn(
+        'Continuing without Word2Vec model - using JSON embeddings only',
+      );
+      this.word2vecLoaded = false;
+      this.word2vecModel = null;
     }
   }
 
@@ -145,10 +194,238 @@ export class RecommendationService {
     return name.toLowerCase().replace(/\s+/g, '_');
   }
 
-  private getIngredientVector(ingredientName: string): number[] | null {
-    if (!this.embeddingsLoaded) return null;
+  private async getIngredientVector(
+    ingredientName: string,
+  ): Promise<number[] | null> {
     const key = this.normalizeIngredientName(ingredientName);
-    return this.ingredientEmbeddings[key] || null;
+
+    // First, check if embedding exists in JSON
+    if (this.embeddingsLoaded && this.ingredientEmbeddings[key]) {
+      this.logger.debug(`📋 Found cached embedding for: ${ingredientName}`);
+      return this.ingredientEmbeddings[key];
+    }
+
+    // If not found in JSON and Word2Vec model is available, calculate using Word2Vec
+    if (this.word2vecLoaded && this.word2vecModel) {
+      try {
+        // Add timeout to prevent hanging on getVector calls
+        const vectorPromise = new Promise<number[] | null>((resolve) => {
+          this.word2vecModel.getVector(
+            ingredientName,
+            (error: any, vector: number[]) => {
+              if (error || !vector) {
+                // Try with normalized name
+                this.word2vecModel.getVector(
+                  key,
+                  (error2: any, vector2: number[]) => {
+                    resolve(error2 || !vector2 ? null : vector2);
+                  },
+                );
+              } else {
+                resolve(vector);
+              }
+            },
+          );
+        });
+
+        const timeoutPromise = new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), 2000); // 2 second timeout for individual queries
+        });
+
+        const vector = await Promise.race([vectorPromise, timeoutPromise]);
+
+        if (vector && Array.isArray(vector)) {
+          // Cache the new embedding in memory and save to JSON
+          this.ingredientEmbeddings[key] = vector;
+          await this.saveEmbeddingToFile(key, vector);
+          this.logger.log(
+            `🔄 Generated and cached embedding for ingredient: ${ingredientName} (length: ${vector.length})`,
+          );
+          return vector;
+        } else {
+          this.logger.debug(
+            `🚫 Word2Vec model returned no vector for: ${ingredientName}`,
+          );
+        }
+      } catch (error: any) {
+        this.logger.warn(
+          `Failed to generate embedding for ${ingredientName}:`,
+          error?.message || 'Unknown error',
+        );
+      }
+    }
+
+    // Smart fallback: Try to find similar ingredients in the existing embeddings
+    const fallbackVector = this.findSimilarIngredientVector(ingredientName);
+    if (fallbackVector) {
+      this.logger.log(`🔍 Found similar ingredient for "${ingredientName}"`);
+      return fallbackVector;
+    }
+
+    // If Word2Vec fails or is not available, log but don't fail the entire operation
+    if (!this.embeddingsLoaded || !this.ingredientEmbeddings[key]) {
+      this.logger.debug(`No embedding found for ingredient: ${ingredientName}`);
+    }
+
+    return null;
+  }
+
+  private async saveEmbeddingToFile(
+    key: string,
+    vector: number[],
+  ): Promise<void> {
+    try {
+      // Validate input
+      if (!key || !Array.isArray(vector) || vector.length === 0) {
+        this.logger.warn(`Invalid embedding data for key: ${key}`);
+        return;
+      }
+
+      // Write the updated embeddings back to the JSON file
+      const updatedEmbeddings = { ...this.ingredientEmbeddings };
+      updatedEmbeddings[key] = vector;
+
+      await fs.promises.writeFile(
+        this.embeddingPath,
+        JSON.stringify(updatedEmbeddings, null, 2),
+        'utf-8',
+      );
+      this.logger.debug(`💾 Saved embedding for ${key} to file`);
+    } catch (error: any) {
+      this.logger.error(
+        'Error saving embedding to file:',
+        error?.stack || error?.message || 'Unknown error',
+      );
+    }
+  }
+
+  private findSimilarIngredientVector(ingredient: string): number[] | null {
+    const normalized = this.normalizeIngredientName(ingredient);
+
+    // Try various matching strategies
+    const strategies = [
+      // Strategy 1: Exact match with different normalization
+      () => {
+        const alternatives = [
+          ingredient.toLowerCase(),
+          ingredient.toLowerCase().replace(/[^a-z]/g, ''),
+          ingredient.toLowerCase().replace(/\s+/g, ''),
+          normalized.replace(/_/g, ''),
+        ];
+
+        for (const alt of alternatives) {
+          if (this.ingredientEmbeddings[alt]) {
+            this.logger.debug(
+              `📍 Found exact alternative: ${alt} for ${ingredient}`,
+            );
+            return this.ingredientEmbeddings[alt];
+          }
+        }
+        return null;
+      },
+
+      // Strategy 2: Partial word matching
+      () => {
+        const words = ingredient
+          .toLowerCase()
+          .split(/[\s\-_()]+/)
+          .filter((w) => w.length > 2);
+
+        for (const word of words) {
+          // Look for embeddings that contain this word
+          for (const [key, embedding] of Object.entries(
+            this.ingredientEmbeddings,
+          )) {
+            if (key.includes(word) || word.includes(key.replace(/_/g, ''))) {
+              this.logger.debug(
+                `📍 Found partial match: ${key} for ${ingredient} (word: ${word})`,
+              );
+              return embedding;
+            }
+          }
+        }
+        return null;
+      },
+
+      // Strategy 3: Common ingredient mappings
+      () => {
+        const commonMappings: Record<string, string> = {
+          beef: 'beef',
+          chicken: 'chicken',
+          pork: 'pork',
+          tomato: 'tomatoes',
+          onion: 'onions',
+          garlic: 'garlic',
+          olive_oil: 'oil',
+          vegetable_oil: 'oil',
+          salt: 'salt',
+          pepper: 'pepper',
+          basil: 'basil',
+          oregano: 'oregano',
+          thyme: 'thyme',
+          paprika: 'paprika',
+          cumin: 'cumin',
+          ginger: 'ginger',
+          lemon: 'lemon',
+          lime: 'lime',
+          butter: 'butter',
+          cheese: 'cheese',
+          milk: 'milk',
+          cream: 'cream',
+          flour: 'flour',
+          sugar: 'sugar',
+          egg: 'eggs',
+          rice: 'rice',
+          pasta: 'pasta',
+          bread: 'bread',
+          potato: 'potatoes',
+          carrot: 'carrots',
+          celery: 'celery',
+          bell_pepper: 'pepper',
+          mushroom: 'mushrooms',
+          spinach: 'spinach',
+        };
+
+        // Check if any part of the ingredient matches common mappings
+        const words = normalized.split('_');
+        for (const word of words) {
+          if (
+            commonMappings[word] &&
+            this.ingredientEmbeddings[commonMappings[word]]
+          ) {
+            this.logger.debug(
+              `📍 Found common mapping: ${commonMappings[word]} for ${ingredient}`,
+            );
+            return this.ingredientEmbeddings[commonMappings[word]];
+          }
+        }
+
+        // Check reverse mappings
+        for (const [common, mapped] of Object.entries(commonMappings)) {
+          if (
+            normalized.includes(common) &&
+            this.ingredientEmbeddings[mapped]
+          ) {
+            this.logger.debug(
+              `📍 Found reverse mapping: ${mapped} for ${ingredient}`,
+            );
+            return this.ingredientEmbeddings[mapped];
+          }
+        }
+
+        return null;
+      },
+    ];
+
+    // Try each strategy in order
+    for (const strategy of strategies) {
+      const result = strategy();
+      if (result) {
+        return result;
+      }
+    }
+
+    return null;
   }
 
   private async processBatch(recipes: Recipe[]) {
@@ -205,9 +482,12 @@ export class RecommendationService {
       recipeVector.vector = tfidfVector;
 
       // Calculate ingredient embedding vector (average of all ingredient embeddings)
-      const ingredientVectors = recipeVector.recipe.ingredients
-        .map((ing) => this.getIngredientVector(ing.name))
-        .filter((vec): vec is number[] => vec !== null);
+      const ingredientVectorPromises = recipeVector.recipe.ingredients.map(
+        (ing) => this.getIngredientVector(ing.name),
+      );
+      const ingredientVectors = (
+        await Promise.all(ingredientVectorPromises)
+      ).filter((vec): vec is number[] => vec !== null);
 
       if (ingredientVectors.length > 0) {
         const avgVector = new Array(ingredientVectors[0].length).fill(0);
@@ -292,29 +572,49 @@ export class RecommendationService {
     return totalMatches / totalPossible;
   }
 
-  private calculateEmbeddingSimilarity(
+  private async calculateEmbeddingSimilarity(
     queryIngredients: string[],
     recipeIngredients: string[],
-  ): number {
-    if (
-      !this.embeddingsLoaded ||
-      queryIngredients.length === 0 ||
-      recipeIngredients.length === 0
-    ) {
+  ): Promise<number> {
+    if (queryIngredients.length === 0 || recipeIngredients.length === 0) {
       return 0;
     }
 
-    // Get embeddings for query ingredients
-    const queryVectors = queryIngredients
-      .map((ing) => this.getIngredientVector(ing))
-      .filter((vec): vec is number[] => vec !== null);
+    // Get embeddings for query ingredients (now async)
+    const queryVectorPromises = queryIngredients.map((ing) =>
+      this.getIngredientVector(ing),
+    );
+    const queryVectors = (await Promise.all(queryVectorPromises)).filter(
+      (vec): vec is number[] => vec !== null,
+    );
 
-    // Get embeddings for recipe ingredients
-    const recipeVectors = recipeIngredients
-      .map((ing) => this.getIngredientVector(ing))
-      .filter((vec): vec is number[] => vec !== null);
+    // Get embeddings for recipe ingredients (now async)
+    const recipeVectorPromises = recipeIngredients.map((ing) =>
+      this.getIngredientVector(ing),
+    );
+    const recipeVectors = (await Promise.all(recipeVectorPromises)).filter(
+      (vec): vec is number[] => vec !== null,
+    );
+
+    // Log embedding success rates
+    const querySuccessRate =
+      (queryVectors.length / queryIngredients.length) * 100;
+    const recipeSuccessRate =
+      (recipeVectors.length / recipeIngredients.length) * 100;
+
+    if (
+      queryVectors.length < queryIngredients.length ||
+      recipeVectors.length < recipeIngredients.length
+    ) {
+      this.logger.debug(
+        `📊 Embedding coverage - Query: ${querySuccessRate.toFixed(1)}% (${queryVectors.length}/${queryIngredients.length}), Recipe: ${recipeSuccessRate.toFixed(1)}% (${recipeVectors.length}/${recipeIngredients.length})`,
+      );
+    }
 
     if (queryVectors.length === 0 || recipeVectors.length === 0) {
+      this.logger.debug(
+        `⚠️ No valid embeddings found - Query vectors: ${queryVectors.length}, Recipe vectors: ${recipeVectors.length}`,
+      );
       return 0;
     }
 
@@ -472,7 +772,7 @@ export class RecommendationService {
     try {
       this.logger.log('Initializing collaborative filtering model...');
       this.model = null;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error loading collaborative model', error.stack);
       this.model = null;
     }
@@ -511,16 +811,28 @@ export class RecommendationService {
         `🥬 Query ingredients: ${queryIngredientNames.join(', ')}`,
       );
 
+      this.logger.log(`🗂️ Total recipe vectors: ${this.recipeVectors.length}`);
+      this.logger.log(
+        `🚫 Excluding recipe IDs: ${excludeRecipeIds.length > 0 ? excludeRecipeIds.join(', ') : 'none'}`,
+      );
+
       const availableRecipes = this.recipeVectors.filter(
         (rv) => !excludeRecipeIds.includes(rv.recipe.id),
       );
+
+      // Debug: Log which recipes are available
+      availableRecipes.forEach((rv) => {
+        this.logger.log(
+          `📋 Available recipe: "${rv.recipe.title}" (ID: ${rv.recipe.id})`,
+        );
+      });
 
       this.logger.log(
         `🍳 Available recipes after exclusion: ${availableRecipes.length}`,
       );
 
-      const scoredRecipes = availableRecipes
-        .map((rv) => {
+      const allScoredRecipes = await Promise.all(
+        availableRecipes.map(async (rv) => {
           const recipeIngredientNames = rv.recipe.ingredients.map(
             (i) => i.name,
           );
@@ -532,7 +844,7 @@ export class RecommendationService {
           );
 
           // 2. Semantic similarity using embeddings (30% weight)
-          const embeddingScore = this.calculateEmbeddingSimilarity(
+          const embeddingScore = await this.calculateEmbeddingSimilarity(
             queryIngredientNames,
             recipeIngredientNames,
           );
@@ -567,11 +879,18 @@ export class RecommendationService {
             );
           }
 
+          this.logger.log(
+            `🔢 Recipe "${rv.recipe.title}" final score: ${finalScore.toFixed(3)}`,
+          );
+
           return {
             recipe: rv.recipe,
             score: finalScore,
           };
-        })
+        }),
+      );
+
+      const scoredRecipes = allScoredRecipes
         .filter((item) => {
           const meetsThreshold = item.score >= minScore;
           if (!meetsThreshold) {
@@ -604,7 +923,7 @@ export class RecommendationService {
         type: 'content' as const,
         reason: `Similar to ingredients: ${queryIngredientNames.join(', ')}`,
       }));
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error in content-based recommendations', error.stack);
       return [];
     }
@@ -809,8 +1128,8 @@ export class RecommendationService {
       );
 
       return hybridRecommendations;
-    } catch (error) {
-      this.logger.error('Error in hybrid recommendations', error.stack);
+    } catch (error: any) {
+      this.logger.error('Error in collaborative recommendations', error.stack);
       return [];
     }
   }

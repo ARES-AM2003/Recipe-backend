@@ -1,16 +1,17 @@
 import { Exclude } from 'class-transformer';
-import { 
-  Column, 
-  Entity, 
-  PrimaryGeneratedColumn, 
-  CreateDateColumn, 
-  UpdateDateColumn, 
+import {
+  Column,
+  Entity,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
   OneToMany,
   ManyToMany,
-  JoinTable
+  JoinTable,
 } from 'typeorm';
 import { Recipe } from '../../recipes/entities/recipe.entity';
 import { PantryItem } from '../../pantry/entities/pantry-item.entity';
+import { SavedRecipe } from '../../recipes/entities/saved-recipe.entity';
 
 export enum UserRole {
   USER = 'user',
@@ -64,6 +65,9 @@ export class User {
   @ManyToMany(() => Recipe, (recipe) => recipe.likedBy, { onDelete: 'CASCADE' })
   @JoinTable()
   likedRecipes: Recipe[];
+
+  @OneToMany(() => SavedRecipe, (savedRecipe) => savedRecipe.user)
+  savedRecipes: SavedRecipe[];
 
   constructor(partial: Partial<User>) {
     Object.assign(this, partial);

@@ -124,7 +124,7 @@ export class LikesService {
       .select(['recipe.id'])
       .addSelect('COUNT(likedBy.id)', 'likeCount')
       .groupBy('recipe.id')
-      .orderBy('likeCount', 'DESC')
+      .orderBy('"likeCount"', 'DESC')
       .getRawMany();
 
     const currentRecipeRank =
@@ -145,17 +145,13 @@ export class LikesService {
   }
 
   /**
-   * Get user's liked recipes with advanced filtering
+   * Get user's liked recipes
    */
   async getUserLikedRecipes(
     userId: string,
     options: {
       page?: number;
       limit?: number;
-      cuisine?: string;
-      difficulty?: string;
-      sortBy?: 'likedAt' | 'title' | 'rating' | 'cookTime';
-      sortOrder?: 'ASC' | 'DESC';
     } = {},
   ): Promise<{
     data: Recipe[];
@@ -165,79 +161,21 @@ export class LikesService {
       total: number;
       totalPages: number;
     };
-    summary: {
-      totalLiked: number;
-      cuisineBreakdown: Record<string, number>;
-      difficultyBreakdown: Record<string, number>;
-    };
   }> {
-    const {
-      page = 1,
-      limit = 10,
-      cuisine,
-      difficulty,
-      sortBy = 'likedAt',
-      sortOrder = 'DESC',
-    } = options;
+    const { page = 1, limit = 10 } = options;
 
-    let query = this.recipesRepository
+    const query = this.recipesRepository
       .createQueryBuilder('recipe')
       .leftJoinAndSelect('recipe.author', 'author')
       .leftJoinAndSelect('recipe.ingredients', 'ingredients')
       .leftJoin('recipe.likedBy', 'likedUser')
-      .where('likedUser.id = :userId', { userId });
-
-    // Apply filters
-    if (cuisine) {
-      query = query.andWhere('recipe.cuisine = :cuisine', { cuisine });
-    }
-
-    if (difficulty) {
-      query = query.andWhere('recipe.difficulty = :difficulty', { difficulty });
-    }
-
-    // Apply sorting
-    switch (sortBy) {
-      case 'title':
-        query = query.orderBy('recipe.title', sortOrder);
-        break;
-      case 'rating':
-        query = query.orderBy('recipe.averageRating', sortOrder);
-        break;
-      case 'cookTime':
-        query = query.orderBy('recipe.cookTime', sortOrder);
-        break;
-      default:
-        query = query.orderBy('recipe.createdAt', sortOrder);
-    }
+      .where('likedUser.id = :userId', { userId })
+      .orderBy('recipe.createdAt', 'DESC');
 
     const [data, total] = await query
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
-
-    // Get summary statistics
-    const allLikedRecipes = await this.recipesRepository
-      .createQueryBuilder('recipe')
-      .leftJoin('recipe.likedBy', 'likedUser')
-      .where('likedUser.id = :userId', { userId })
-      .getMany();
-
-    const cuisineBreakdown = allLikedRecipes.reduce(
-      (acc, recipe) => {
-        acc[recipe.cuisine] = (acc[recipe.cuisine] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
-
-    const difficultyBreakdown = allLikedRecipes.reduce(
-      (acc, recipe) => {
-        acc[recipe.difficulty] = (acc[recipe.difficulty] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
 
     return {
       data,
@@ -246,11 +184,6 @@ export class LikesService {
         limit,
         total,
         totalPages: Math.ceil(total / limit),
-      },
-      summary: {
-        totalLiked: allLikedRecipes.length,
-        cuisineBreakdown,
-        difficultyBreakdown,
       },
     };
   }
@@ -282,7 +215,7 @@ export class LikesService {
       .select(['recipe.id', 'recipe.title', 'author.name'])
       .addSelect('COUNT(likedBy.id)', 'likeCount')
       .groupBy('recipe.id, author.id')
-      .orderBy('likeCount', 'DESC')
+      .orderBy('"likeCount"', 'DESC')
       .limit(10)
       .getRawMany();
 
