@@ -17,11 +17,17 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { RecipesService } from './recipes.service';
-import { CreateRecipeDto } from './dto/create-recipe.dto';
+import {
+  CreateRecipeDto,
+  BulkCreateRecipeDto,
+  BulkCreateRecipeResultDto,
+} from './dto/create-recipe.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
 import { FilterRecipesDto } from './dto/filter-recipes.dto';
 import { BulkUploadResultDto } from './dto/bulk-upload-recipe.dto';
+import { ExtractRecipeFromUrlDto } from './dto/extract-recipe-from-url.dto';
 import { RecipeFilterService } from './recipe-filter.service';
+import { RecipeExtractorService } from './recipe-extractor.service';
 import { ExcelParserService } from './utils/excel-parser.service';
 import { LikesService } from './likes.service';
 import { SavedRecipesService } from './saved-recipes.service';
@@ -62,6 +68,7 @@ export class RecipesController {
   constructor(
     private readonly recipesService: RecipesService,
     private readonly recipeFilterService: RecipeFilterService,
+    private readonly recipeExtractorService: RecipeExtractorService,
     private readonly excelParserService: ExcelParserService,
     private readonly likesService: LikesService,
     private readonly savedRecipesService: SavedRecipesService,
@@ -77,6 +84,98 @@ export class RecipesController {
   ) {
     return await this.recipesService.create(createRecipeDto, req.user);
   }
+
+  @Get('test-api-key')
+  @Auth()
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Test if OpenRouter API key is working',
+    description: 'Makes a simple test call to verify the API key is valid',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'API key is working',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        model: { type: 'string' },
+        testResponse: { type: 'string' },
+      },
+    },
+  })
+  async testApiKey() {
+    try {
+      const result = await this.recipeExtractorService.testApiKey();
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        error: error.toString(),
+      };
+    }
+  }
+
+  @Post('extract-from-url')
+  @Auth()
+  @ApiBearerAuth('JWT')
+  @ApiOperation({
+    summary: 'Extract and create recipe from URL using AI',
+    description:
+      'Fetches a recipe from a URL, extracts recipe data using Groq AI, and creates the recipe in the database',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Recipe extracted and created successfully',
+    type: RecipeResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid URL or extraction failed',
+  })
+  async extractRecipeFromUrl(
+    @Body() extractDto: ExtractRecipeFromUrlDto,
+    @Req() req: RequestWithUser,
+  ) {
+    // Extract recipe data from URL using AI
+    const extractedData =
+      await this.recipeExtractorService.extractRecipeFromUrl(
+        extractDto.url,
+        extractDto.additionalInstructions,
+        extractDto.rawHtml,
+      );
+
+    // Create recipe from extracted data
+    const recipe = await this.recipesService.createRecipeFromExtractedData(
+      extractedData,
+      req.user,
+    );
+
+    return recipe;
+  }
+
+  @Post('bulk')
+  @Auth()
+  @ApiBearerAuth('JWT')
+  @ApiOperation({ summary: 'Create multiple recipes in bulk via JSON' })
+  @ApiResponse({
+    status: 201,
+    description: 'Recipes processed successfully',
+    type: BulkCreateRecipeResultDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid request data',
+  })
+  async bulkCreate(
+    @Body() bulkCreateDto: BulkCreateRecipeDto,
+    @Req() req: RequestWithUser,
+  ): Promise<BulkCreateRecipeResultDto> {
+    return await this.recipesService.bulkCreate(bulkCreateDto, req.user);
+  }
+
   @Auth()
   @ApiBearerAuth('JWT')
   @Get('mine')

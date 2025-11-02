@@ -176,6 +176,7 @@ export class RatingsService {
     data: Array<{
       id: string;
       userId: string;
+      userName: string;
       value: number;
       comment: string | null;
       createdAt: Date;
@@ -190,6 +191,7 @@ export class RatingsService {
   }> {
     const qb = this.ratingRepository
       .createQueryBuilder('r')
+      .leftJoinAndSelect('r.user', 'u')
       .select([
         'r.id',
         'r.userId',
@@ -197,6 +199,7 @@ export class RatingsService {
         'r.comment',
         'r.createdAt',
         'r.updatedAt',
+        'u.name',
       ])
       .where('r.recipeId = :recipeId', { recipeId })
       .orderBy('r.updatedAt', 'DESC')
@@ -209,6 +212,7 @@ export class RatingsService {
       data: rows.map((r) => ({
         id: r.id,
         userId: r.userId,
+        userName: r.user?.name || 'Anonymous',
         value: r.value,
         comment: r.comment ?? null,
         createdAt: r.createdAt,

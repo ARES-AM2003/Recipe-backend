@@ -7,13 +7,21 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, Brackets } from 'typeorm';
 import { Recipe } from './entities/recipe.entity';
 import { User } from '../users/entities/user.entity';
-import { CreateRecipeDto } from './dto/create-recipe.dto';
+import {
+  CreateRecipeDto,
+  BulkCreateRecipeDto,
+  BulkCreateRecipeResultDto,
+} from './dto/create-recipe.dto';
 import { UpdateRecipeDto } from './dto/update-recipe.dto';
 import {
   BulkRecipeDto,
   BulkUploadResultDto,
 } from './dto/bulk-upload-recipe.dto';
-import { Ingredient } from '../ingredients/entities/ingredient.entity';
+import { ExtractedRecipeDataDto } from './dto/extract-recipe-from-url.dto';
+import {
+  Ingredient,
+  IngredientCategory,
+} from '../ingredients/entities/ingredient.entity';
 
 type RecipeRelations = {
   author?: boolean;
@@ -74,6 +82,42 @@ export class RecipesService {
     });
 
     return this.recipesRepository.save(recipe);
+  }
+
+  async bulkCreate(
+    bulkCreateDto: BulkCreateRecipeDto,
+    author: User,
+  ): Promise<BulkCreateRecipeResultDto> {
+    const result: BulkCreateRecipeResultDto = {
+      successCount: 0,
+      failureCount: 0,
+      createdRecipeIds: [],
+      errors: [],
+      message: '',
+    };
+
+    for (let i = 0; i < bulkCreateDto.recipes.length; i++) {
+      const recipeDto = bulkCreateDto.recipes[i];
+      try {
+        // Create the recipe
+        const recipe = await this.create(recipeDto, author);
+
+        result.successCount++;
+        result.createdRecipeIds.push(recipe.id);
+      } catch (error) {
+        result.failureCount++;
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        result.errors.push({
+          index: i,
+          error: errorMessage,
+        });
+      }
+    }
+
+    result.message = `Processed ${bulkCreateDto.recipes.length} recipes. ${result.successCount} successful, ${result.failureCount} failed.`;
+
+    return result;
   }
 
   async findAll(
@@ -570,5 +614,296 @@ export class RecipesService {
     };
 
     return createRecipeDto;
+  }
+
+  /**
+   * Creates a recipe from extracted URL data
+   * Handles ingredient matching and creation
+   */
+  async createRecipeFromExtractedData(
+    extractedData: ExtractedRecipeDataDto,
+    author: User,
+  ): Promise<Recipe> {
+    console.log('🔍 Processing ingredients from extracted data...');
+    console.log(
+      `📊 Total ingredients to process: ${extractedData.ingredients.length}`,
+    );
+
+    // Process ingredients sequentially to avoid race conditions with duplicates
+    const processedIngredients: Array<{
+      ingredientId: string;
+      amount: number;
+      unit: string;
+      notes?: string;
+    }> = [];
+    const ingredientCache = new Map<string, string>(); // name -> id cache
+
+    for (let index = 0; index < extractedData.ingredients.length; index++) {
+      const ingredientData = extractedData.ingredients[index];
+      const ingredientName = ingredientData.name.trim().toLowerCase();
+
+      console.log(
+        `\n🔎 [${index + 1}/${extractedData.ingredients.length}] Processing: "${ingredientName}"`,
+      );
+      console.log(`   Amount: ${ingredientData.amount} ${ingredientData.unit}`);
+      if (ingredientData.notes) {
+        console.log(`   Notes: ${ingredientData.notes}`);
+      }
+
+      // Check cache first (for duplicates in same recipe)
+      if (ingredientCache.has(ingredientName)) {
+        const cachedId = ingredientCache.get(ingredientName)!;
+        console.log(
+          `   ♻️  Found in cache (duplicate in this recipe): ID ${cachedId}`,
+        );
+        processedIngredients.push({
+          ingredientId: cachedId,
+          amount: ingredientData.amount,
+          unit: ingredientData.unit,
+          notes: ingredientData.notes,
+        });
+        continue;
+      }
+
+      // Try to find existing ingredient by name (case-insensitive)
+      console.log(`   🔍 Searching database for existing ingredient...`);
+      let existingIngredient = await this.ingredientsRepository
+        .createQueryBuilder('ingredient')
+        .where('LOWER(ingredient.name) = LOWER(:name)', {
+          name: ingredientName,
+        })
+        .getOne();
+
+      if (existingIngredient) {
+        console.log(
+          `   ✅ Found existing ingredient: "${existingIngredient.name}" (ID: ${existingIngredient.id})`,
+        );
+        console.log(`   📁 Category: ${existingIngredient.category}`);
+        ingredientCache.set(ingredientName, existingIngredient.id);
+        processedIngredients.push({
+          ingredientId: existingIngredient.id,
+          amount: ingredientData.amount,
+          unit: ingredientData.unit,
+          notes: ingredientData.notes,
+        });
+        continue;
+      }
+
+      // If ingredient doesn't exist, create it with error handling for race conditions
+      console.log(`   ➕ Ingredient not found, creating new entry...`);
+      try {
+        const newIngredient = this.ingredientsRepository.create({
+          name: ingredientName,
+          category: IngredientCategory.OTHER,
+        });
+        const savedIngredient =
+          await this.ingredientsRepository.save(newIngredient);
+
+        console.log(
+          `   ✅ Created new ingredient: "${savedIngredient.name}" (ID: ${savedIngredient.id})`,
+        );
+        console.log(`   📁 Category: ${savedIngredient.category}`);
+
+        ingredientCache.set(ingredientName, savedIngredient.id);
+        processedIngredients.push({
+          ingredientId: savedIngredient.id,
+          amount: ingredientData.amount,
+          unit: ingredientData.unit,
+          notes: ingredientData.notes,
+        });
+      } catch (error: any) {
+        // Handle duplicate key error (race condition with another request)
+        if (error.code === '23505') {
+          console.log(
+            `   ⚠️  Race condition detected, fetching existing ingredient...`,
+          );
+          // Fetch the ingredient that was created by another process
+          existingIngredient = await this.ingredientsRepository
+            .createQueryBuilder('ingredient')
+            .where('LOWER(ingredient.name) = LOWER(:name)', {
+              name: ingredientName,
+            })
+            .getOne();
+
+          if (existingIngredient) {
+            console.log(
+              `   ✅ Found ingredient created by concurrent request: "${existingIngredient.name}" (ID: ${existingIngredient.id})`,
+            );
+            ingredientCache.set(ingredientName, existingIngredient.id);
+            processedIngredients.push({
+              ingredientId: existingIngredient.id,
+              amount: ingredientData.amount,
+              unit: ingredientData.unit,
+              notes: ingredientData.notes,
+            });
+          } else {
+            throw new Error(
+              `Failed to create or find ingredient: ${ingredientName}`,
+            );
+          }
+        } else {
+          // Re-throw other errors
+          throw error;
+        }
+      }
+    }
+    console.log(`\n✅ All ingredients processed successfully!`);
+    console.log(
+      `📊 Summary: ${processedIngredients.length} ingredients ready for recipe`,
+    );
+
+    // Map enum values to match database enum format
+    const mapDifficulty = (difficulty: string | undefined): any => {
+      if (!difficulty) return 'Easy';
+      const normalized = difficulty.toUpperCase();
+      switch (normalized) {
+        case 'EASY':
+          return 'Easy';
+        case 'MEDIUM':
+          return 'Medium';
+        case 'HARD':
+          return 'Hard';
+        default:
+          return 'Easy';
+      }
+    };
+
+    const mapCuisine = (cuisine: string | undefined): any => {
+      if (!cuisine) return 'Other';
+      const normalized = cuisine.toUpperCase();
+      switch (normalized) {
+        case 'ITALIAN':
+          return 'Italian';
+        case 'MEXICAN':
+          return 'Mexican';
+        case 'INDIAN':
+          return 'Indian';
+        case 'CHINESE':
+          return 'Chinese';
+        case 'JAPANESE':
+          return 'Japanese';
+        case 'AMERICAN':
+          return 'American';
+        case 'MEDITERRANEAN':
+          return 'Mediterranean';
+        case 'THAI':
+          return 'Thai';
+        case 'FRENCH':
+          return 'French';
+        case 'NEPALESE':
+          return 'Other'; // Map non-standard cuisines to Other
+        case 'KOREAN':
+          return 'Other';
+        case 'VIETNAMESE':
+          return 'Other';
+        case 'OTHER':
+          return 'Other';
+        default:
+          return 'Other';
+      }
+    };
+
+    const mapMealType = (mealType: string | undefined): any => {
+      if (!mealType) return 'Lunch';
+      const normalized = mealType.toUpperCase();
+      switch (normalized) {
+        case 'BREAKFAST':
+          return 'Breakfast';
+        case 'LUNCH':
+          return 'Lunch';
+        case 'DINNER':
+          return 'Dinner';
+        case 'DESSERT':
+          return 'Dessert';
+        case 'SNACK':
+          return 'Snack';
+        case 'APPETIZER':
+          return 'Appetizer';
+        case 'BEVERAGE':
+          return 'Beverage';
+        default:
+          return 'Lunch';
+      }
+    };
+
+    // Clean up instructions formatting
+    const cleanedInstructions = (extractedData.instructions || [])
+      .map((instruction: string) => {
+        if (!instruction || typeof instruction !== 'string') return '';
+
+        let cleaned = instruction
+          .trim()
+          // Remove leading numbers and dots (1. 2. etc)
+          .replace(/^\d+\.\s*/, '')
+          // Remove leading bullets (-, *, •)
+          .replace(/^[-*•]\s*/, '')
+          // Remove multiple spaces
+          .replace(/\s+/g, ' ')
+          // Remove extra dots at end
+          .replace(/\.+$/, '.')
+          .trim();
+
+        // Capitalize first letter
+        if (cleaned.length > 0) {
+          cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+        }
+
+        // Add period if missing
+        if (cleaned.length > 0 && !/[.!?]$/.test(cleaned)) {
+          cleaned += '.';
+        }
+
+        return cleaned;
+      })
+      .filter((instruction: string) => instruction.length > 5); // Remove very short/empty instructions
+
+    console.log(
+      `\n📝 Instructions cleaned: ${cleanedInstructions.length} steps`,
+    );
+    if (cleanedInstructions.length > 0) {
+      console.log(`   Sample: "${cleanedInstructions[0].substring(0, 80)}..."`);
+    }
+
+    // Create recipe DTO with properly mapped enum values
+    const createRecipeDto: CreateRecipeDto = {
+      title: extractedData.title,
+      description: extractedData.description || extractedData.title,
+      difficulty: mapDifficulty(extractedData.difficulty),
+      instructions: cleanedInstructions,
+      prepTime: extractedData.prepTime || 0,
+      cookTime: extractedData.cookTime || 0,
+      servings: extractedData.servings || 1,
+      cuisine: mapCuisine(extractedData.cuisine),
+      mealType: mapMealType(extractedData.mealType),
+      tags: extractedData.tags || [],
+      imageUrl: extractedData.imageUrl,
+      ingredients: processedIngredients,
+      calories: extractedData.calories || 0,
+      protein: extractedData.protein || 0,
+      carbs: extractedData.carbs || 0,
+      fat: extractedData.fat || 0,
+      fiber: extractedData.fiber || 0,
+      sugar: extractedData.sugar || 0,
+      sodium: extractedData.sodium || 0,
+    };
+
+    console.log('\n📝 Creating recipe in database...');
+    console.log(`   Title: ${createRecipeDto.title}`);
+    console.log(`   Difficulty: ${createRecipeDto.difficulty}`);
+    console.log(`   Cuisine: ${createRecipeDto.cuisine}`);
+    console.log(`   Meal Type: ${createRecipeDto.mealType}`);
+    console.log(`   Ingredients: ${createRecipeDto.ingredients.length}`);
+    console.log(
+      `   Instructions: ${createRecipeDto.instructions?.length || 0} steps`,
+    );
+
+    // Create and save recipe
+    const recipe = await this.create(createRecipeDto, author);
+
+    console.log('✅ Recipe created successfully!');
+    console.log(`   Recipe ID: ${recipe.id}`);
+    console.log(`   Title: ${recipe.title}`);
+
+    return recipe;
   }
 }

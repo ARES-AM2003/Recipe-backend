@@ -10,6 +10,7 @@ import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { UsersModule } from '../users/users.module';
 import { IngredientsModule } from '../ingredients/ingredients.module';
 import { ExcelParserService } from './utils/excel-parser.service';
+import { RecipeExtractorService } from './recipe-extractor.service';
 import { LikesService } from './likes.service';
 import { SavedRecipesService } from './saved-recipes.service';
 import { Rating } from './entities/rating.entity';
@@ -25,6 +26,7 @@ import { RatingsService } from './ratings.service';
   providers: [
     RecipesService,
     RecipeFilterService,
+    RecipeExtractorService,
     ExcelParserService,
     LikesService,
     SavedRecipesService,

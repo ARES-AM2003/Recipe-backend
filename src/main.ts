@@ -8,7 +8,13 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { ValidationPipe as CustomValidationPipe } from './common/pipes/validation.pipe';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: true,
+  });
+
+  // ✅ Increase body size limit for bulk operations
+  app.use(require('express').json({ limit: '50mb' }));
+  app.use(require('express').urlencoded({ limit: '50mb', extended: true }));
 
   // ✅ Enable cookie parsing for JWT extraction
   app.use(cookieParser());
