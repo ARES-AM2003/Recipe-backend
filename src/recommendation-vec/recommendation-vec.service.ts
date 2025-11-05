@@ -26,7 +26,7 @@ export class RecommendationVecService implements OnModuleInit {
   private word2vecModel: any = null;
   private word2vecLoaded = false;
   private embeddingPath: string;
-  private readonly MIN_COSINE_SIMILARITY = 0.45;
+  private readonly MIN_COSINE_SIMILARITY = 0.3;
 
   constructor(
     @InjectRepository(User) private usersRepo: Repository<User>,
@@ -38,8 +38,8 @@ export class RecommendationVecService implements OnModuleInit {
     await this.initializeEmbeddings();
   }
 
-  private async initializeEmbeddings() {
-    if (this.embeddingsLoaded) return;
+  private async initializeEmbeddings(forceReload: boolean = false) {
+    if (this.embeddingsLoaded && !forceReload) return;
 
     this.embeddingPath = path.resolve(
       __dirname,
@@ -52,10 +52,8 @@ export class RecommendationVecService implements OnModuleInit {
 
     this.embeddings = JSON.parse(fs.readFileSync(this.embeddingPath, 'utf-8'));
     this.embeddingsLoaded = true;
-    console.log(
-      '✅ Loaded embeddings for',
-      Object.keys(this.embeddings).length,
-      'ingredients',
+    this.logger.log(
+      `✅ Loaded embeddings for ${Object.keys(this.embeddings).length} ingredients`,
     );
 
     // Load Word2Vec model
@@ -512,5 +510,38 @@ export class RecommendationVecService implements OnModuleInit {
       });
 
     return filteredRecipes.map((r) => r.recipe);
+  }
+
+  /**
+   * Reload embeddings from file without restarting the server
+   * Useful when new ingredients are added to the system
+   */
+  async reloadEmbeddings(): Promise<{
+    success: boolean;
+    ingredientCount: number;
+    message: string;
+  }> {
+    try {
+      this.logger.log('🔄 Reloading embeddings from file...');
+
+      // Force reload embeddings
+      this.embeddingsLoaded = false;
+      await this.initializeEmbeddings(true);
+
+      const count = Object.keys(this.embeddings).length;
+
+      return {
+        success: true,
+        ingredientCount: count,
+        message: `Successfully reloaded ${count} ingredient embeddings`,
+      };
+    } catch (error: any) {
+      this.logger.error('Error reloading embeddings', error?.stack || error);
+      return {
+        success: false,
+        ingredientCount: 0,
+        message: `Failed to reload embeddings: ${error?.message || 'Unknown error'}`,
+      };
+    }
   }
 }
