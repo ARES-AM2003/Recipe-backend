@@ -26,7 +26,7 @@ export class RecommendationVecService implements OnModuleInit {
   private word2vecModel: any = null;
   private word2vecLoaded = false;
   private embeddingPath: string;
-  private readonly MIN_COSINE_SIMILARITY = 0.6;
+  private readonly MIN_COSINE_SIMILARITY = 0.45;
 
   constructor(
     @InjectRepository(User) private usersRepo: Repository<User>,
