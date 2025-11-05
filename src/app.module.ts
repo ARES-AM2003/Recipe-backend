@@ -20,6 +20,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ValidationPipe as CustomValidationPipe } from './common/pipes/validation.pipe';
 import { RecommendationVecModule } from './recommendation-vec/recommendation-vec.module';
+import { RecommendationCustomModule } from './recommendation-custom/recommendation-custom.module';
 
 @Module({
   imports: [
@@ -32,10 +33,12 @@ import { RecommendationVecModule } from './recommendation-vec/recommendation-vec
       useFactory: getDatabaseConfig,
       inject: [ConfigService],
     }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000, // Time to live in milliseconds (60 seconds)
-      limit: 100,  // Maximum number of requests within TTL
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // Time to live in milliseconds (60 seconds)
+        limit: 100, // Maximum number of requests within TTL
+      },
+    ]),
     AuthModule,
     UsersModule,
     RecipesModule,
@@ -45,6 +48,7 @@ import { RecommendationVecModule } from './recommendation-vec/recommendation-vec
     NutritionModule,
     DatabaseModule,
     RecommendationVecModule,
+    RecommendationCustomModule,
   ],
   controllers: [AppController],
   providers: [
