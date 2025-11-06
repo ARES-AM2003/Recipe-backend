@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RecipesService } from './recipes.service';
 import { RecipeFilterService } from './recipe-filter.service';
@@ -9,6 +9,7 @@ import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { UsersModule } from '../users/users.module';
 import { IngredientsModule } from '../ingredients/ingredients.module';
+import { RecommendationCustomModule } from '../recommendation-custom/recommendation-custom.module';
 import { ExcelParserService } from './utils/excel-parser.service';
 import { RecipeExtractorService } from './recipe-extractor.service';
 import { LikesService } from './likes.service';
@@ -21,6 +22,7 @@ import { RatingsService } from './ratings.service';
     TypeOrmModule.forFeature([Recipe, SavedRecipe, Rating, User, Ingredient]),
     UsersModule,
     IngredientsModule,
+    forwardRef(() => RecommendationCustomModule),
   ],
   controllers: [RecipesController],
   providers: [

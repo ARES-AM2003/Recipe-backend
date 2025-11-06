@@ -19,12 +19,12 @@ async function bootstrap() {
   // ✅ Enable cookie parsing for JWT extraction
   app.use(cookieParser());
 
-  // ✅ Enable CORS
-  // console.log(process.env.ALLOWED_ORIGINS?.split(','));
+  // ✅ Enable CORS - Allow access from any IP/origin
   app.enableCors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000',
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    origin: true, // Allow all origins
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true, // ✅ Required for sending/receiving cookies
+    allowedHeaders: 'Content-Type, Accept, Authorization',
   });
   app.useGlobalPipes(
     new ValidationPipe({

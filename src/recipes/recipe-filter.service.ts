@@ -337,9 +337,13 @@ export class RecipeFilterService {
         queryBuilder.orderBy('recipe.createdAt', 'ASC');
         break;
       case SortOption.RATING_DESC:
+        // Filter out recipes with no rating (averageRating = 0 or reviewCount = 0)
+        queryBuilder.andWhere('recipe.averageRating > 0');
         queryBuilder.orderBy('recipe.averageRating', 'DESC');
         break;
       case SortOption.RATING_ASC:
+        // Filter out recipes with no rating (averageRating = 0 or reviewCount = 0)
+        queryBuilder.andWhere('recipe.averageRating > 0');
         queryBuilder.orderBy('recipe.averageRating', 'ASC');
         break;
       case SortOption.TIME_ASC:

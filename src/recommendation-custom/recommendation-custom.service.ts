@@ -40,8 +40,9 @@ export class RecommendationCustomService implements OnModuleInit {
 
   /**
    * Initialize the custom TF-IDF model with all recipes
+   * This can be called to refresh the model when new recipes are added
    */
-  private async initializeCustomTfIdf() {
+  async initializeCustomTfIdf() {
     try {
       this.logger.log('🚀 Initializing Custom TF-IDF recommendation engine...');
       const startTime = Date.now();
@@ -78,6 +79,12 @@ export class RecommendationCustomService implements OnModuleInit {
       this.logger.log(
         `✅ Custom TF-IDF engine initialized in ${duration}ms with ${recipes.length} recipes`,
       );
+
+      return {
+        success: true,
+        recipeCount: recipes.length,
+        vocabularySize: this.vocabulary.length,
+      };
     } catch (error: any) {
       this.logger.error(
         '❌ Error initializing custom TF-IDF engine',
@@ -372,5 +379,18 @@ export class RecommendationCustomService implements OnModuleInit {
       recipeCount: this.recipeVectors.length,
       sampleVocabulary: this.vocabulary.slice(0, 50), // First 50 terms
     };
+  }
+
+  /**
+   * Reinitialize the recommendation engine (useful after adding new recipes)
+   * This is a wrapper around initializeCustomTfIdf for explicit reinitialization
+   */
+  async reinitialize(): Promise<{
+    success: boolean;
+    recipeCount: number;
+    vocabularySize: number;
+  }> {
+    this.logger.log('🔄 Reinitializing Custom TF-IDF engine...');
+    return await this.initializeCustomTfIdf();
   }
 }

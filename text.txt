@@ -19,3 +19,9 @@ docker image prune -f
   "email": "admin@example.com",
   "password": "AdminStrongPass123"
 }
+
+
+docker pull ares2003/recipefrontend:latest
+docker stop recipie-frontend && docker rm recipie-frontend
+docker run -d   --name recipie-frontend      -p 44444:3000   --network recipe-net   ares2003/recipefrontend:latest
+docker image prune -f

@@ -12,7 +12,7 @@ interface RecommendationFilters {
   difficulty?: string;
   cuisine?: string;
   mealType?: string;
-  maxPrepTime?: number;
+  maxPrepTime?: number; // Total time: prepTime + cookTime
   minRating?: number;
   tags?: string[];
   minCosineSimilarity?: number;
@@ -26,7 +26,7 @@ export class RecommendationVecService implements OnModuleInit {
   private word2vecModel: any = null;
   private word2vecLoaded = false;
   private embeddingPath: string;
-  private readonly MIN_COSINE_SIMILARITY = 0.3;
+  private readonly MIN_COSINE_SIMILARITY = 0.35;
 
   constructor(
     @InjectRepository(User) private usersRepo: Repository<User>,
@@ -342,6 +342,15 @@ export class RecommendationVecService implements OnModuleInit {
     filters: RecommendationFilters = {},
   ): Promise<Recipe[]> {
     await this.initializeEmbeddings();
+
+    // Log incoming filters
+    this.logger.log('🔍 Incoming filters:', JSON.stringify(filters));
+    if (filters.maxPrepTime) {
+      this.logger.log(
+        `⏱️ Max prep time filter: ${filters.maxPrepTime} minutes (total time)`,
+      );
+    }
+
     const user = await this.usersRepo.findOne({
       where: { id: userId },
       relations: ['pantryItems', 'pantryItems.ingredient'],
@@ -475,11 +484,16 @@ export class RecommendationVecService implements OnModuleInit {
         }
 
         if (filters.maxPrepTime) {
-          if (recipe.prepTime > filters.maxPrepTime) {
-            console.log(`[Filter] ${recipe.title} ❌ maxPrepTime`);
+          const totalTime = (recipe.prepTime || 0) + (recipe.cookTime || 0);
+          if (totalTime > filters.maxPrepTime) {
+            this.logger.log(
+              `[Filter] ${recipe.title} ❌ maxPrepTime (prep:${recipe.prepTime}, cook:${recipe.cookTime}, total:${totalTime} > ${filters.maxPrepTime})`,
+            );
             passed = false;
           } else {
-            console.log(`[Filter] ${recipe.title} ✅ maxPrepTime`);
+            this.logger.log(
+              `[Filter] ${recipe.title} ✅ maxPrepTime (prep:${recipe.prepTime}, cook:${recipe.cookTime}, total:${totalTime} <= ${filters.maxPrepTime})`,
+            );
           }
         }
 

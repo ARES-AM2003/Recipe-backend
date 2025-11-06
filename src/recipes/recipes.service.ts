@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, Brackets } from 'typeorm';
@@ -22,6 +24,7 @@ import {
   Ingredient,
   IngredientCategory,
 } from '../ingredients/entities/ingredient.entity';
+import { RecommendationCustomService } from '../recommendation-custom/recommendation-custom.service';
 
 type RecipeRelations = {
   author?: boolean;
@@ -35,6 +38,8 @@ export class RecipesService {
     private readonly recipesRepository: Repository<Recipe>,
     @InjectRepository(Ingredient)
     private readonly ingredientsRepository: Repository<Ingredient>,
+    @Inject(forwardRef(() => RecommendationCustomService))
+    private readonly recommendationCustomService: RecommendationCustomService,
   ) {}
 
   private getDefaultRelations(relations: RecipeRelations = {}) {
@@ -81,7 +86,14 @@ export class RecipesService {
       ingredients,
     });
 
-    return this.recipesRepository.save(recipe);
+    const savedRecipe = await this.recipesRepository.save(recipe);
+
+    // Reinitialize recommendation engine in background
+    this.recommendationCustomService.reinitialize().catch((err) => {
+      console.error('Failed to reinitialize recommendation engine:', err);
+    });
+
+    return savedRecipe;
   }
 
   async bulkCreate(
@@ -211,7 +223,14 @@ export class RecipesService {
     // Update other recipe data
     Object.assign(recipe, recipeData);
 
-    return this.recipesRepository.save(recipe);
+    const savedRecipe = await this.recipesRepository.save(recipe);
+
+    // Reinitialize recommendation engine in background after update
+    this.recommendationCustomService.reinitialize().catch((err) => {
+      console.error('Failed to reinitialize recommendation engine:', err);
+    });
+
+    return savedRecipe;
   }
 
   async remove(id: string, userId: string): Promise<void> {
@@ -223,6 +242,11 @@ export class RecipesService {
     }
 
     await this.recipesRepository.remove(recipe);
+
+    // Reinitialize recommendation engine in background after deletion
+    this.recommendationCustomService.reinitialize().catch((err) => {
+      console.error('Failed to reinitialize recommendation engine:', err);
+    });
   }
 
   async likeRecipe(
